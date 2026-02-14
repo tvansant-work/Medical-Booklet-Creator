@@ -72,8 +72,6 @@ st.set_page_config(
     layout="wide",
     page_icon="📋",
     menu_items={
-        "Get help": "mailto:tvansant@friends.tas.edu.au?subject=Medical Booklet Creator",
-        "Report a bug": "mailto:tvansant@friends.tas.edu.au?subject=Medical Booklet Bug Report",
         "About": "**Medical Booklet Creator**\n\nBuilt for Friends' School excursion and field activity planning.\n\nCreated by Thomas van Sant. Contact via email for support."
     }
 )
