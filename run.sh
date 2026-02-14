@@ -4,8 +4,7 @@
 #  Double-click this file, or run: bash run.sh
 # ─────────────────────────────────────────────
 
-# If double-clicked in Finder, macOS runs this without a visible Terminal.
-# Relaunch inside Terminal so staff can see progress and press Ctrl+C to stop.
+# If double-clicked in Finder, relaunch inside a visible Terminal window
 if [ -z "$TERM" ] && [ "$(uname)" = "Darwin" ]; then
     SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
     open -a Terminal "$SCRIPT_PATH"
@@ -14,7 +13,18 @@ fi
 
 cd "$(dirname "$0")"
 
-# ── Auto-update from GitHub ───────────────────
+# ── Set library path for WeasyPrint (conda path) ─────────────────
+# conda run doesn't reliably execute activation hooks, so we set
+# DYLD_LIBRARY_PATH directly from the path recorded during setup.
+if [ -f ".conda-lib-path" ]; then
+    ENV_LIB_PATH="$(cat .conda-lib-path)"
+    if [ -n "$ENV_LIB_PATH" ] && [ -d "$ENV_LIB_PATH" ]; then
+        export DYLD_LIBRARY_PATH="${ENV_LIB_PATH}:${DYLD_LIBRARY_PATH}"
+        export DYLD_FALLBACK_LIBRARY_PATH="${ENV_LIB_PATH}:${DYLD_FALLBACK_LIBRARY_PATH}"
+    fi
+fi
+
+# ── Auto-update from GitHub ───────────────────────────────────────
 if command -v git &>/dev/null && [ -d ".git" ]; then
     echo ""
     echo "  🔄  Checking for updates..."
@@ -36,7 +46,6 @@ if command -v git &>/dev/null && [ -d ".git" ]; then
                 || git pull --quiet --ff-only origin master 2>/dev/null \
                 || echo "  ⚠️   Update skipped (local changes detected)."
 
-            # Update packages if requirements changed
             if [ -f ".venv/bin/pip" ]; then
                 .venv/bin/pip install -r requirements.txt -q 2>/dev/null
             elif [ -f ".conda-env-name" ] && command -v conda &>/dev/null; then
@@ -49,7 +58,7 @@ if command -v git &>/dev/null && [ -d ".git" ]; then
     fi
 fi
 
-# ── Find Python ───────────────────────────────
+# ── Find Python ───────────────────────────────────────────────────
 METHOD=""; ENV_NAME=""
 [ -f ".install-method" ] && METHOD="$(cat .install-method)"
 [ -f ".conda-env-name" ] && ENV_NAME="$(cat .conda-env-name)"
@@ -58,9 +67,18 @@ PYTHON=""
 if [ "$METHOD" = "venv" ] && [ -f ".venv/bin/python" ]; then
     PYTHON=".venv/bin/python"
 elif [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-    for CONDA_PATH in "$HOME/miniforge3/bin/conda" "$HOME/opt/miniforge3/bin/conda" \
-                      "$HOME/mambaforge/bin/conda" "$(command -v conda 2>/dev/null)"; do
-        [ -f "$CONDA_PATH" ] && { export PATH="$(dirname "$CONDA_PATH"):$PATH"; break; }
+    for CONDA_PATH in \
+        "$HOME/miniconda3/bin/conda" \
+        "$HOME/miniforge3/bin/conda" \
+        "$HOME/opt/miniconda3/bin/conda" \
+        "$HOME/opt/miniforge3/bin/conda" \
+        "$HOME/mambaforge/bin/conda" \
+        "$(command -v conda 2>/dev/null)"
+    do
+        if [ -f "$CONDA_PATH" ]; then
+            export PATH="$(dirname "$CONDA_PATH"):$PATH"
+            break
+        fi
     done
     PYTHON="$(conda run -n "$ENV_NAME" which python 2>/dev/null)"
 elif [ -f ".venv/bin/python" ]; then
@@ -71,14 +89,14 @@ fi
 
 if [ -z "$PYTHON" ] || ! $PYTHON -c "import streamlit" &>/dev/null 2>&1; then
     echo ""
-    echo "  ❌  Setup not complete. Please run setup first:"
+    echo "  ❌  Setup not complete. Please run:"
     echo "      bash setup.sh"
     echo ""
     read -p "  Press Enter to close..."
     exit 1
 fi
 
-# ── Launch ────────────────────────────────────
+# ── Launch ────────────────────────────────────────────────────────
 echo ""
 echo "  ✅  Starting Medical Booklet Creator..."
 echo "      Opening in your browser now."
@@ -88,9 +106,15 @@ echo "      Press Ctrl+C to stop the app."
 echo ""
 
 if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-    conda run -n "$ENV_NAME" python -m streamlit run app.py \
-        --server.headless false \
-        --browser.gatherUsageStats false
+    # Pass library path through to conda run subprocess
+    DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH" \
+    DYLD_FALLBACK_LIBRARY_PATH="$DYLD_FALLBACK_LIBRARY_PATH" \
+    conda run -n "$ENV_NAME" \
+        env DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH" \
+            DYLD_FALLBACK_LIBRARY_PATH="$DYLD_FALLBACK_LIBRARY_PATH" \
+        python -m streamlit run app.py \
+            --server.headless false \
+            --browser.gatherUsageStats false
 else
     $PYTHON -m streamlit run app.py \
         --server.headless false \
