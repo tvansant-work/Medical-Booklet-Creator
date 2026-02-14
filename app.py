@@ -67,7 +67,16 @@ TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 TEMP_DIR = os.path.join(BASE_DIR, "_temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-st.set_page_config(page_title="Medical Booklet Creator", layout="wide", page_icon="📋")
+st.set_page_config(
+    page_title="Medical Booklet Creator",
+    layout="wide",
+    page_icon="📋",
+    menu_items={
+        "Get help": "mailto:tvansant@friends.tas.edu.au?subject=Medical Booklet Creator",
+        "Report a bug": "mailto:tvansant@friends.tas.edu.au?subject=Medical Booklet Bug Report",
+        "About": "**Medical Booklet Creator**\n\nBuilt for Friends' School excursion and field activity planning.\n\nCreated by Thomas van Sant. Contact via email for support."
+    }
+)
 
 try:
     with open("config.yaml", "r") as f:
@@ -1331,35 +1340,35 @@ def image_to_a4_pdf(upload):
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-  /* ── Global typography & background ── */
-  [data-testid="stAppViewContainer"] { background: #f8f9fc; }
+  /* ── Global background ── */
+  [data-testid="stAppViewContainer"] { background: #f5f6fa; }
   [data-testid="stSidebar"] { display: none; }
 
-  /* ── Header bar ── */
+  /* ── Header bar — warm teal gradient ── */
   .mbc-header {
-    background: #ffffff;
-    border-bottom: 1px solid #e8eaf0;
-    padding: 18px 0 14px 0;
+    background: linear-gradient(135deg, #1a7f6e 0%, #2563a8 100%);
+    padding: 20px 0 16px 0;
     margin-bottom: 28px;
+    border-radius: 0 0 14px 14px;
   }
   .mbc-header-inner {
     max-width: 960px;
     margin: 0 auto;
-    padding: 0 24px;
+    padding: 0 28px;
     display: flex;
     align-items: baseline;
     justify-content: space-between;
   }
   .mbc-title {
-    font-size: 1.25rem;
+    font-size: 1.3rem;
     font-weight: 650;
-    color: #1a1d2e;
+    color: #ffffff;
     letter-spacing: -0.01em;
     margin: 0;
   }
   .mbc-subtitle {
     font-size: 0.78rem;
-    color: #9295a8;
+    color: rgba(255,255,255,0.6);
     margin: 0;
     font-weight: 400;
   }
@@ -1367,7 +1376,7 @@ st.markdown("""
   /* ── Tab styling ── */
   [data-testid="stTabs"] [role="tablist"] {
     gap: 4px;
-    border-bottom: 2px solid #e8eaf0;
+    border-bottom: 2px solid #e2e5ee;
     padding-bottom: 0;
   }
   [data-testid="stTabs"] [role="tab"] {
@@ -1380,8 +1389,8 @@ st.markdown("""
     background: transparent !important;
   }
   [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
-    color: #2d5be3 !important;
-    border-bottom: 2px solid #2d5be3 !important;
+    color: #1a7f6e !important;
+    border-bottom: 2px solid #1a7f6e !important;
     background: transparent !important;
   }
 
@@ -1391,19 +1400,24 @@ st.markdown("""
     font-weight: 650;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: #9295a8;
+    color: #1a7f6e;
     margin: 28px 0 12px 0;
     padding-bottom: 8px;
-    border-bottom: 1px solid #e8eaf0;
+    border-bottom: 2px solid #d0ede9;
   }
 
-  /* ── Upload cards ── */
+  /* ── Upload cards — required (teal left border) ── */
   .upload-card {
     background: #ffffff;
-    border: 1px solid #e8eaf0;
+    border: 1px solid #e2e5ee;
+    border-left: 4px solid #1a7f6e;
     border-radius: 10px;
     padding: 16px 18px;
     margin-bottom: 10px;
+  }
+  /* optional cards — softer amber border */
+  .upload-card.optional {
+    border-left-color: #e8960a;
   }
   .upload-card-label {
     font-size: 0.82rem;
@@ -1422,14 +1436,15 @@ st.markdown("""
     gap: 5px;
     font-size: 0.75rem;
     font-weight: 500;
-    color: #2d5be3;
+    color: #1a7f6e;
     text-decoration: none;
-    background: #eef2fd;
-    border: 1px solid #c5d5f8;
+    background: #e8f7f4;
+    border: 1px solid #a8ddd6;
     border-radius: 5px;
     padding: 3px 9px;
     margin-bottom: 8px;
   }
+  .seqta-link:hover { background: #d0ede9; }
 
   /* ── Step badge ── */
   .step-badge {
@@ -1437,7 +1452,7 @@ st.markdown("""
     align-items: center;
     justify-content: center;
     width: 24px; height: 24px;
-    background: #2d5be3;
+    background: #1a7f6e;
     color: white;
     border-radius: 50%;
     font-size: 0.75rem;
@@ -1445,21 +1460,13 @@ st.markdown("""
     margin-right: 8px;
     flex-shrink: 0;
   }
-  .step-row {
-    display: flex;
-    align-items: center;
-    margin-bottom: 6px;
-  }
-  .step-label {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: #1a1d2e;
-  }
+  .step-row { display: flex; align-items: center; margin-bottom: 6px; }
+  .step-label { font-size: 0.95rem; font-weight: 600; color: #1a1d2e; }
 
-  /* ── Options grid ── */
+  /* ── Options card titles ── */
   .options-card {
     background: #ffffff;
-    border: 1px solid #e8eaf0;
+    border: 1px solid #e2e5ee;
     border-radius: 10px;
     padding: 18px 20px;
     margin-bottom: 12px;
@@ -1467,7 +1474,7 @@ st.markdown("""
   .options-card-title {
     font-size: 0.8rem;
     font-weight: 650;
-    color: #4a4d62;
+    color: #1a7f6e;
     text-transform: uppercase;
     letter-spacing: 0.06em;
     margin-bottom: 10px;
@@ -1477,29 +1484,29 @@ st.markdown("""
   .mbc-footer {
     margin-top: 48px;
     padding-top: 16px;
-    border-top: 1px solid #e8eaf0;
+    border-top: 1px solid #e2e5ee;
     text-align: center;
     font-size: 0.75rem;
     color: #b0b3c4;
   }
 
   /* ── Streamlit element overrides ── */
-  [data-testid="stFileUploader"] {
-    background: #fafbff;
-    border-radius: 8px;
-  }
+  [data-testid="stFileUploader"] { background: #fafcfb; border-radius: 8px; }
   div[data-testid="stCheckbox"] label { font-size: 0.88rem !important; }
   div[data-testid="stSelectbox"] label { font-size: 0.88rem !important; }
+
+  /* Primary button — teal */
   .stButton > button[kind="primary"] {
-    background: #2d5be3 !important;
+    background: linear-gradient(135deg, #1a7f6e, #2563a8) !important;
     border: none !important;
     border-radius: 8px !important;
     font-weight: 600 !important;
     padding: 10px 28px !important;
     font-size: 0.9rem !important;
+    color: #ffffff !important;
   }
   .stButton > button[kind="primary"]:hover {
-    background: #2450cc !important;
+    opacity: 0.92 !important;
   }
   .stButton > button:not([kind="primary"]) {
     border-radius: 7px !important;
@@ -1508,10 +1515,17 @@ st.markdown("""
   [data-testid="stTextInput"] input {
     border-radius: 8px !important;
     font-size: 0.9rem !important;
+    border-color: #d0ede9 !important;
   }
-  div.stAlert {
-    border-radius: 8px !important;
-    font-size: 0.85rem !important;
+  [data-testid="stTextInput"] input:focus {
+    border-color: #1a7f6e !important;
+    box-shadow: 0 0 0 2px rgba(26,127,110,0.15) !important;
+  }
+  div.stAlert { border-radius: 8px !important; font-size: 0.85rem !important; }
+
+  /* Progress bar — teal */
+  [data-testid="stProgress"] > div > div {
+    background: linear-gradient(90deg, #1a7f6e, #2563a8) !important;
   }
 </style>
 """, unsafe_allow_html=True)
@@ -1574,7 +1588,7 @@ with t1:
     col_c, col_d, col_e = st.columns(3)
     with col_c:
         st.markdown("""
-        <div class="upload-card">
+        <div class="upload-card optional">
           <div class="upload-card-label">Attendance CSV</div>
           <div class="upload-card-desc">Adds home contacts and addresses to each profile.</div>
         </div>
@@ -1583,7 +1597,7 @@ with t1:
 
     with col_d:
         st.markdown("""
-        <div class="upload-card">
+        <div class="upload-card optional">
           <div class="upload-card-label">Swimming Ability CSV</div>
           <div class="upload-card-desc">Adds swimming competency to each student profile.</div>
         </div>
@@ -1592,7 +1606,7 @@ with t1:
 
     with col_e:
         st.markdown("""
-        <div class="upload-card">
+        <div class="upload-card optional">
           <div class="upload-card-label">Dietary Requirements CSV</div>
           <div class="upload-card-desc">Adds dietary needs and generates a summary table.</div>
         </div>
