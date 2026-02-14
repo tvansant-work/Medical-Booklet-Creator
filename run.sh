@@ -1,73 +1,88 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
 #  Medical Booklet Creator — Launcher
-#  Run from Terminal: bash run.sh
+#  Double-click this file, or run: bash run.sh
 # ─────────────────────────────────────────────
+
+# If double-clicked in Finder, macOS runs this without a visible Terminal.
+# Relaunch inside Terminal so staff can see progress and press Ctrl+C to stop.
+if [ -z "$TERM" ] && [ "$(uname)" = "Darwin" ]; then
+    SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    open -a Terminal "$SCRIPT_PATH"
+    exit 0
+fi
 
 cd "$(dirname "$0")"
 
-# ── Read install method recorded during setup ─
-METHOD=""
-ENV_NAME=""
-if [ -f ".install-method" ]; then
-    METHOD="$(cat .install-method)"
-fi
-if [ -f ".conda-env-name" ]; then
-    ENV_NAME="$(cat .conda-env-name)"
-fi
+# ── Auto-update from GitHub ───────────────────
+if command -v git &>/dev/null && [ -d ".git" ]; then
+    echo ""
+    echo "  🔄  Checking for updates..."
 
-# ── Find the right Python ─────────────────────
-PYTHON=""
+    git fetch --quiet origin 2>/dev/null &
+    FETCH_PID=$!
+    sleep 5
+    if kill -0 $FETCH_PID 2>/dev/null; then
+        kill $FETCH_PID 2>/dev/null
+        echo "  ⚠️   No internet — running current version."
+    else
+        wait $FETCH_PID
+        LOCAL=$(git rev-parse HEAD 2>/dev/null)
+        REMOTE=$(git rev-parse origin/main 2>/dev/null || git rev-parse origin/master 2>/dev/null)
 
-if [ "$METHOD" = "venv" ] && [ -f ".venv/bin/python" ]; then
-    PYTHON=".venv/bin/python"
+        if [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
+            echo "  📦  Update found — downloading..."
+            git pull --quiet --ff-only origin main 2>/dev/null \
+                || git pull --quiet --ff-only origin master 2>/dev/null \
+                || echo "  ⚠️   Update skipped (local changes detected)."
 
-elif [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-    # Locate conda
-    for CONDA_PATH in \
-        "$HOME/miniforge3/bin/conda" \
-        "$HOME/opt/miniforge3/bin/conda" \
-        "$HOME/mambaforge/bin/conda" \
-        "$(command -v conda 2>/dev/null)"
-    do
-        if [ -f "$CONDA_PATH" ]; then
-            export PATH="$(dirname "$CONDA_PATH"):$PATH"
-            break
+            # Update packages if requirements changed
+            if [ -f ".venv/bin/pip" ]; then
+                .venv/bin/pip install -r requirements.txt -q 2>/dev/null
+            elif [ -f ".conda-env-name" ] && command -v conda &>/dev/null; then
+                conda run -n "$(cat .conda-env-name)" pip install -r requirements.txt -q 2>/dev/null
+            fi
+            echo "  ✅  Updated."
+        else
+            echo "  ✅  Already up to date."
         fi
-    done
-
-    PYTHON="$(conda run -n "$ENV_NAME" which python 2>/dev/null)"
-
-else
-    # Fallback: try venv or system python3
-    if [ -f ".venv/bin/python" ]; then
-        PYTHON=".venv/bin/python"
-    elif command -v python3 &>/dev/null; then
-        PYTHON="python3"
     fi
 fi
 
-# ── Guard: setup not run yet ──────────────────
-if [ -z "$PYTHON" ] || [ ! -f "$PYTHON" ] && ! command -v "$PYTHON" &>/dev/null; then
-    echo ""
-    echo "  ❌  Setup has not been completed."
-    echo "      Please run:  bash setup.sh"
-    echo ""
-    exit 1
+# ── Find Python ───────────────────────────────
+METHOD=""; ENV_NAME=""
+[ -f ".install-method" ] && METHOD="$(cat .install-method)"
+[ -f ".conda-env-name" ] && ENV_NAME="$(cat .conda-env-name)"
+
+PYTHON=""
+if [ "$METHOD" = "venv" ] && [ -f ".venv/bin/python" ]; then
+    PYTHON=".venv/bin/python"
+elif [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
+    for CONDA_PATH in "$HOME/miniforge3/bin/conda" "$HOME/opt/miniforge3/bin/conda" \
+                      "$HOME/mambaforge/bin/conda" "$(command -v conda 2>/dev/null)"; do
+        [ -f "$CONDA_PATH" ] && { export PATH="$(dirname "$CONDA_PATH"):$PATH"; break; }
+    done
+    PYTHON="$(conda run -n "$ENV_NAME" which python 2>/dev/null)"
+elif [ -f ".venv/bin/python" ]; then
+    PYTHON=".venv/bin/python"
+elif command -v python3 &>/dev/null; then
+    PYTHON="python3"
 fi
 
-if ! $PYTHON -c "import streamlit" &>/dev/null; then
+if [ -z "$PYTHON" ] || ! $PYTHON -c "import streamlit" &>/dev/null 2>&1; then
     echo ""
-    echo "  ❌  Packages not found. Please run:  bash setup.sh"
+    echo "  ❌  Setup not complete. Please run setup first:"
+    echo "      bash setup.sh"
     echo ""
+    read -p "  Press Enter to close..."
     exit 1
 fi
 
 # ── Launch ────────────────────────────────────
 echo ""
 echo "  ✅  Starting Medical Booklet Creator..."
-echo "      Your browser will open automatically."
-echo "      If it doesn't, go to: http://localhost:8501"
+echo "      Opening in your browser now."
+echo "      If it doesn't open, go to: http://localhost:8501"
 echo ""
 echo "      Press Ctrl+C to stop the app."
 echo ""

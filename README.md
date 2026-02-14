@@ -51,7 +51,7 @@ When you update `app.py`, `config.yaml`, or `profiles.html`:
 3. Write a short summary (e.g. `Update medical card layout`) and click **Commit to main**
 4. Click **Push origin**
 
-Colleagues get the update by downloading a fresh ZIP from GitHub — or if they're comfortable with Terminal, running `git pull`.
+Colleagues who cloned the repo (rather than downloading a ZIP) will receive updates **automatically** — `run.sh` checks GitHub and pulls any changes every time it launches. If they downloaded a ZIP, they'll need to re-download it for major updates.
 
 ---
 
