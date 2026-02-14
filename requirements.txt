@@ -1,0 +1,9 @@
+streamlit
+pandas
+pyyaml
+pdfplumber
+Pillow
+jinja2
+weasyprint
+pypdf
+watchdog

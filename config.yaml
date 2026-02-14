@@ -1,0 +1,55 @@
+app_settings:
+  school_portal_url: "https://synweb.friends.tas.edu.au"
+
+column_mappings:
+  student_id: "Code"
+  first_name: "First name"
+  surname: "Surname"
+  year: "Year"
+  rollgroup: "Rollgroup"
+  medical_notes: "Medical notes"
+  emergency_notes: "Emergency notes"
+  special_notes: "Special notes"
+  # These lines must be indented to belong to column_mappings
+  house: "House"
+  general_notes: "General notes"
+  doctor_details: "Doctor notes"
+
+severity_keywords:
+  - "Life Threatening"
+  - "Anaphylaxis"
+  - "Diabetes"
+  - "Epipen"
+  - "Severe"
+
+default_profile_layout:
+  - section: "Medical Information"
+    fields:
+      - "Medical notes"
+  - section: "Emergency Contacts"
+    fields:
+      - "Emergency notes"
+  - section: "Learning & Support"
+    fields:
+      - "Special notes"
+
+contact_file_mappings:
+  join_key: "ID"  # The column in the new file that matches the Student ID
+  sc1_name_pref: "SC1 Preferred"
+  sc1_name_sur: "SC1 Surname"
+  sc1_mobile: "SC1 Mobile"
+  sc2_name_pref: "SC2 Preferred"
+  sc2_name_sur: "SC2 Surname"
+  sc2_mobile: "SC2 Mobile"
+  address: "Contact Address"
+  home_phone: "Home Phone"
+
+swimming_file_mappings:
+  parent_first_name: "First Name"
+  parent_surname: "Surname"
+  student_name: "Student"
+  swimming_ability: ""  # Last unnamed column (column index 6)
+
+dietary_file_mappings:
+  student_name: "Student"  # Column containing student full name
+  dietary_requirements: "Dietary Requirements"  # Column containing dietary info

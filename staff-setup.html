@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Medical Booklet Creator — Setup Guide</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600&family=DM+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --ink:       #1a1a2e;
+    --ink-soft:  #4a4a6a;
+    --ink-faint: #8888aa;
+    --bg:        #f7f7fb;
+    --surface:   #ffffff;
+    --border:    #e2e2ee;
+    --accent:    #2d5be3;
+    --accent-bg: #eef2fd;
+    --green:     #1a7f5a;
+    --green-bg:  #e8f7f2;
+    --amber:     #92600a;
+    --amber-bg:  #fdf4e3;
+    --step-size: 2.5rem;
+  }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    color: var(--ink);
+    background: var(--bg);
+    min-height: 100vh;
+  }
+
+  /* ── Layout ── */
+  .page-wrap {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 60px 24px 100px;
+  }
+
+  /* ── Header ── */
+  header {
+    margin-bottom: 52px;
+  }
+
+  .wordmark {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .wordmark-icon {
+    width: 40px;
+    height: 40px;
+    background: var(--accent);
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .wordmark-icon svg {
+    width: 22px;
+    height: 22px;
+    fill: none;
+    stroke: #fff;
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+
+  .wordmark-text {
+    font-size: 13px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+  }
+
+  h1 {
+    font-size: 2rem;
+    font-weight: 600;
+    letter-spacing: -0.02em;
+    line-height: 1.2;
+    color: var(--ink);
+    margin-bottom: 12px;
+  }
+
+  .subtitle {
+    color: var(--ink-soft);
+    font-size: 15px;
+    font-weight: 300;
+    max-width: 480px;
+  }
+
+  /* ── Privacy notice ── */
+  .privacy-bar {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    background: var(--green-bg);
+    border: 1px solid #b6e3d4;
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin-bottom: 48px;
+    font-size: 13.5px;
+    color: var(--green);
+    font-weight: 400;
+    line-height: 1.5;
+  }
+
+  .privacy-bar .icon {
+    font-size: 16px;
+    flex-shrink: 0;
+    margin-top: 1px;
+  }
+
+  /* ── Section headers ── */
+  .section-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 20px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  /* ── Steps ── */
+  .steps {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    margin-bottom: 52px;
+  }
+
+  .step {
+    display: grid;
+    grid-template-columns: var(--step-size) 1fr;
+    gap: 0 20px;
+    position: relative;
+  }
+
+  /* Vertical connector line between steps */
+  .step:not(:last-child) .step-number::after {
+    content: '';
+    position: absolute;
+    top: var(--step-size);
+    left: calc(var(--step-size) / 2 - 1px);
+    width: 2px;
+    height: calc(100% - var(--step-size) + 16px);
+    background: var(--border);
+  }
+
+  .step-number {
+    position: relative;
+    width: var(--step-size);
+    height: var(--step-size);
+    background: var(--accent);
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 13px;
+    font-weight: 600;
+    flex-shrink: 0;
+    margin-top: 2px;
+  }
+
+  .step-body {
+    padding-bottom: 36px;
+  }
+
+  .step-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--ink);
+    margin-bottom: 6px;
+    line-height: 1.3;
+    padding-top: 4px;
+  }
+
+  .step-desc {
+    color: var(--ink-soft);
+    font-size: 14px;
+    margin-bottom: 16px;
+    font-weight: 300;
+  }
+
+  /* ── Code blocks ── */
+  .code-block {
+    background: var(--ink);
+    border-radius: 10px;
+    overflow: hidden;
+    margin: 12px 0;
+    position: relative;
+  }
+
+  .code-label {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #6b7db3;
+    padding: 10px 16px 0;
+    font-family: 'DM Mono', monospace;
+  }
+
+  .code-block pre {
+    font-family: 'DM Mono', monospace;
+    font-size: 13.5px;
+    line-height: 1.6;
+    color: #c9d1e8;
+    padding: 10px 16px 14px;
+    overflow-x: auto;
+    white-space: pre;
+  }
+
+  .copy-btn {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid rgba(255,255,255,0.12);
+    color: #8899cc;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.15s;
+    letter-spacing: 0.03em;
+  }
+
+  .copy-btn:hover {
+    background: rgba(255,255,255,0.15);
+    color: #ffffff;
+  }
+
+  .copy-btn.copied {
+    background: rgba(26,127,90,0.3);
+    border-color: rgba(26,127,90,0.5);
+    color: #6dddb4;
+  }
+
+  /* ── Inline code ── */
+  code {
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    background: var(--accent-bg);
+    color: var(--accent);
+    padding: 1px 5px;
+    border-radius: 4px;
+  }
+
+  /* ── Note callout ── */
+  .note {
+    background: var(--amber-bg);
+    border: 1px solid #f0d49a;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13.5px;
+    color: var(--amber);
+    margin: 12px 0;
+    line-height: 1.5;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .note .note-icon { flex-shrink: 0; font-size: 15px; }
+
+  /* ── Tip callout ── */
+  .tip {
+    background: var(--accent-bg);
+    border: 1px solid #c5d5f8;
+    border-radius: 8px;
+    padding: 12px 16px;
+    font-size: 13.5px;
+    color: #2a4bb5;
+    margin: 12px 0;
+    line-height: 1.5;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+
+  .tip .tip-icon { flex-shrink: 0; font-size: 15px; }
+
+  /* ── Divider ── */
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 48px 0;
+  }
+
+  /* ── Everyday use section ── */
+  .use-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px 28px;
+    margin-bottom: 16px;
+  }
+
+  .use-card h3 {
+    font-size: 15px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--ink);
+  }
+
+  .use-card p {
+    color: var(--ink-soft);
+    font-size: 14px;
+    font-weight: 300;
+    margin-bottom: 12px;
+  }
+
+  /* ── Troubleshooting ── */
+  details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    overflow: hidden;
+  }
+
+  summary {
+    padding: 14px 18px;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    color: var(--ink);
+  }
+
+  summary::-webkit-details-marker { display: none; }
+
+  summary::after {
+    content: '+';
+    font-size: 18px;
+    color: var(--ink-faint);
+    font-weight: 300;
+    transition: transform 0.2s;
+  }
+
+  details[open] summary::after {
+    content: '−';
+  }
+
+  .details-body {
+    padding: 0 18px 16px;
+    font-size: 14px;
+    color: var(--ink-soft);
+    font-weight: 300;
+    line-height: 1.6;
+    border-top: 1px solid var(--border);
+    padding-top: 14px;
+  }
+
+  /* ── Footer ── */
+  footer {
+    margin-top: 64px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--ink-faint);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+</style>
+</head>
+<body>
+<div class="page-wrap">
+
+  <!-- Header -->
+  <header>
+    <div class="wordmark">
+      <div class="wordmark-icon">
+        <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+      </div>
+      <div class="wordmark-text">Medical Booklet Creator</div>
+    </div>
+    <h1>Setup Guide</h1>
+    <p class="subtitle">Get the app running on your Mac in about 10 minutes. You only need to do this once.</p>
+  </header>
+
+  <!-- Privacy notice -->
+  <div class="privacy-bar">
+    <span class="icon">🔒</span>
+    <span><strong>Your data stays on your computer.</strong> This app runs entirely on your own Mac. Files you upload are never sent anywhere — all processing happens locally and the PDF downloads directly to your device.</span>
+  </div>
+
+  <!-- SETUP STEPS -->
+  <p class="section-label">First-time setup</p>
+
+  <div class="steps">
+
+    <!-- Step 1 -->
+    <div class="step">
+      <div class="step-number">1</div>
+      <div class="step-body">
+        <div class="step-title">Download the app</div>
+        <div class="step-desc">Get the app files from GitHub onto your Mac.</div>
+        <ol style="color:var(--ink-soft);font-size:14px;font-weight:300;padding-left:20px;line-height:2;">
+          <li>Go to the repository link your colleague shared</li>
+          <li>Click the green <strong style="color:var(--ink);">&lt;&gt; Code</strong> button → <strong style="color:var(--ink);">Download ZIP</strong></li>
+          <li>Open your Downloads folder and double-click the ZIP to unzip it</li>
+          <li>Move the resulting folder to your <strong style="color:var(--ink);">Documents</strong> folder</li>
+        </ol>
+      </div>
+    </div>
+
+    <!-- Step 2 -->
+    <div class="step">
+      <div class="step-number">2</div>
+      <div class="step-body">
+        <div class="step-title">Open Terminal</div>
+        <div class="step-desc">Terminal lets you run the setup commands. You won't need to use it much after this.</div>
+        <div class="tip"><span class="tip-icon">💡</span> Press <strong>⌘ Space</strong>, type <strong>Terminal</strong>, press <strong>Enter</strong>. A window with a text prompt will open.</div>
+      </div>
+    </div>
+
+    <!-- Step 3 -->
+    <div class="step">
+      <div class="step-number">3</div>
+      <div class="step-body">
+        <div class="step-title">Navigate to the app folder</div>
+        <div class="step-desc">Tell Terminal where you put the app. Type <code>cd </code> (with a space), then drag the app folder from Finder directly into the Terminal window, then press <strong>Enter</strong>.</div>
+        <div class="tip"><span class="tip-icon">💡</span> The folder is the one containing <code>app.py</code> and <code>setup.sh</code>. Dragging it into Terminal automatically fills in the path for you.</div>
+      </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="step">
+      <div class="step-number">4</div>
+      <div class="step-body">
+        <div class="step-title">Run the setup script</div>
+        <div class="step-desc">Copy the command below, paste it into Terminal, and press <strong>Enter</strong>. This installs everything the app needs — it may take 3–5 minutes.</div>
+        <div class="code-block">
+          <div class="code-label">Terminal</div>
+          <pre>bash setup.sh</pre>
+          <button class="copy-btn" onclick="copyCode(this, 'bash setup.sh')">Copy</button>
+        </div>
+        <div class="note">
+          <span class="note-icon">⚠️</span>
+          <span>If your Mac asks for a password during setup, type your <strong>usual Mac login password</strong> (the one you use to unlock your computer). This is not an IT or admin password — it's just your own account.</span>
+        </div>
+        <div class="step-desc" style="margin-top:12px;">When it finishes you'll see: <code>✅&nbsp; Setup complete!</code></div>
+      </div>
+    </div>
+
+    <!-- Step 5 -->
+    <div class="step">
+      <div class="step-number">5</div>
+      <div class="step-body">
+        <div class="step-title">Start the app</div>
+        <div class="step-desc">Run this command to launch the app. Your browser will open it automatically.</div>
+        <div class="code-block">
+          <div class="code-label">Terminal</div>
+          <pre>bash run.sh</pre>
+          <button class="copy-btn" onclick="copyCode(this, 'bash run.sh')">Copy</button>
+        </div>
+        <div class="tip"><span class="tip-icon">✅</span> The app opens at <strong>http://localhost:8501</strong>. Setup is done — you won't need to repeat these steps.</div>
+      </div>
+    </div>
+
+  </div><!-- /steps -->
+
+  <hr class="divider">
+
+  <!-- EVERYDAY USE -->
+  <p class="section-label">Using the app day-to-day</p>
+
+  <div class="use-card">
+    <h3>Starting the app</h3>
+    <p>Each time you want to use the app, open Terminal, navigate to the app folder, and run:</p>
+    <div class="code-block">
+      <div class="code-label">Terminal</div>
+      <pre>bash run.sh</pre>
+      <button class="copy-btn" onclick="copyCode(this, 'bash run.sh')">Copy</button>
+    </div>
+    <p style="margin-top:12px;">The app will open in your browser at <strong>http://localhost:8501</strong>.</p>
+  </div>
+
+  <div class="use-card">
+    <h3>Stopping the app</h3>
+    <p>When you're finished, go back to the Terminal window and press <strong>Ctrl+C</strong>. You can then close Terminal.</p>
+  </div>
+
+  <div class="use-card">
+    <h3>Getting updates</h3>
+    <p>When a new version is released, download the ZIP from GitHub again, replace the files in your app folder (keep your <code>config.yaml</code>), and run <code>bash setup.sh</code> once to update packages.</p>
+  </div>
+
+  <hr class="divider">
+
+  <!-- TROUBLESHOOTING -->
+  <p class="section-label">Troubleshooting</p>
+
+  <details>
+    <summary>Terminal says "No such file or directory"</summary>
+    <div class="details-body">
+      Terminal isn't in the right folder. Make sure you've navigated to the app folder first — type <code>cd </code> then drag the app folder into Terminal and press Enter. Then try the command again.
+    </div>
+  </details>
+
+  <details>
+    <summary>Setup seems to hang or take a very long time</summary>
+    <div class="details-body">
+      This is normal on the first run — some components can take 5–10 minutes to download on a slow connection. Leave Terminal open and let it finish. You'll see <code>✅ Setup complete!</code> when it's done.
+    </div>
+  </details>
+
+  <details>
+    <summary>The app opens but shows "config.yaml not found"</summary>
+    <div class="details-body">
+      You're running the command from the wrong folder. Navigate to the app folder first: type <code>cd </code> then drag the folder into Terminal and press Enter, then run <code>bash run.sh</code> again.
+    </div>
+  </details>
+
+  <details>
+    <summary>"No module named streamlit" error</summary>
+    <div class="details-body">
+      Setup didn't complete successfully. Run <code>bash setup.sh</code> again from inside the app folder. If you see any red error messages, take a screenshot and send it to the person who set up this app.
+    </div>
+  </details>
+
+  <details>
+    <summary>PDF generates but is blank or looks wrong</summary>
+    <div class="details-body">
+      The PDF rendering libraries may not have installed correctly. Run <code>bash setup.sh</code> again, then close Terminal completely and reopen it before running <code>bash run.sh</code>.
+    </div>
+  </details>
+
+  <details>
+    <summary>"Port 8501 already in use" error</summary>
+    <div class="details-body">
+      The app is already running in another Terminal window. Either use it by going to <strong>http://localhost:8501</strong> in your browser, or find the other Terminal window and press Ctrl+C to stop it first.
+    </div>
+  </details>
+
+  <details>
+    <summary>Setup asks for a password and I'm not sure what to enter</summary>
+    <div class="details-body">
+      Enter your normal Mac login password — the same one you use when you unlock your computer or install an app. This is your own account password and does not require IT credentials. If you don't know it, contact your IT helpdesk.
+    </div>
+  </details>
+
+  <!-- Footer -->
+  <footer>
+    <span>Medical Booklet Creator</span>
+    <span>Created by Thomas van Sant</span>
+  </footer>
+
+</div><!-- /page-wrap -->
+
+<script>
+  function copyCode(btn, text) {
+    navigator.clipboard.writeText(text).then(() => {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    }).catch(() => {
+      // Fallback for older browsers
+      const el = document.createElement('textarea');
+      el.value = text;
+      document.body.appendChild(el);
+      el.select();
+      document.execCommand('copy');
+      document.body.removeChild(el);
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 2000);
+    });
+  }
+</script>
+</body>
+</html>

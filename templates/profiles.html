@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+    @page { size: A4; margin: 15mm 15mm; }
+    body { font-family: Helvetica, Arial, sans-serif; font-size: 11pt; color: #333; }
+    
+    .page-break { page-break-after: always; }
+    .no-break { page-break-inside: avoid; }
+    a { text-decoration: none; color: inherit; } 
+
+    /* COVER */
+    .cover { text-align: center; margin-top: 35%; border: 4px solid #c62828; padding: 30px; }
+    .conf { color: #c62828; font-weight: bold; margin-top: 20px; text-transform: uppercase; letter-spacing: 1px; }
+
+    /* PHOTO GRID (5 per row) */
+    .photo-grid { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-start; margin-top: 10px; }
+    .grid-item { width: 18%; padding: 5px 0; text-align: center; margin-bottom: 10px; }
+    .grid-item:hover { cursor: pointer; opacity: 0.8; }
+    .grid-img { width: 100%; height: 90px; object-fit: contain; margin-bottom: 5px; }
+    .grid-name { font-size: 9pt; font-weight: bold; line-height: 1.1; color: #000; }
+
+    /* TABLES */
+    .matrix-table, .summary-table { width: 100%; border-collapse: collapse; font-size: 10pt; margin-bottom: 20px; }
+    .matrix-table th, .summary-table th { background: #eee; border: 1px solid #999; padding: 6px; text-align: left; font-size: 9pt; }
+    .summary-table th { background: #333; color: white; }
+    .matrix-table td, .summary-table td { border: 1px solid #ccc; padding: 5px; vertical-align: top; }
+    .matrix-table td.center { text-align: center; }
+    
+    .check-mark { font-weight: bold; color: #333; }
+    .red-cross { font-weight: 900; color: #D32F2F; font-size: 14pt; }
+    .summary-list { margin: 0; padding-left: 20px; font-size: 10pt; }
+    .summary-list li { margin-bottom: 6px; }
+    .sum-sev { font-size: 8pt; text-transform: uppercase; color: #d32f2f; font-weight: bold; margin-left: 5px; }
+    .sum-desc { display: block; font-size: 8.5pt; color: #555; margin-top: 2px; font-style: italic; }
+
+    /* PROFILE */
+    .profile { position: relative; min-height: 95vh; padding-bottom: 30px; }
+    .profile-header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #333; padding-bottom: 5mm; margin-bottom: 5mm; }
+    .ph-left { display: flex; gap: 20px; }
+    .profile-photo { width: 120px; height: 150px; object-fit: cover; border: 1px solid #999; }
+    .profile-no-photo { width: 120px; height: 150px; border: 1px dashed #ccc; background: #f9f9f9; color: #aaa; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 9pt; }
+    
+    h1 { margin: 0; font-size: 24pt; line-height: 1.2; }
+    
+    .meta { color: #444; font-size: 11pt; margin-top: 8px; line-height: 1.4; }
+    .meta-row { display: flex; gap: 15px; }
+    .meta label { font-weight: bold; color: #222; margin-right: 4px; }
+    
+    /* SWIMMING ABILITY COLORS */
+    .swim-cannot { color: #d32f2f; font-weight: bold; white-space: nowrap; }
+    .swim-weak { color: #ff6f00; font-weight: bold; white-space: nowrap; }
+    .swim-ok { color: #333; white-space: nowrap; }
+    .swim-none { color: #999; font-style: italic; white-space: nowrap; }
+    
+    h3 { margin-top: 6mm; margin-bottom: 3mm; font-size: 12pt; text-transform: uppercase; color: #444; border-bottom: 1px solid #ddd; padding-bottom: 1mm; }
+    .back-btn { font-size: 9pt; text-transform: uppercase; background: #eee; padding: 5px 10px; border-radius: 4px; color: #555; font-weight: bold; border: 1px solid #ccc; }
+
+    /* CARDS & GRIDS */
+    .doc-grid { display: flex; flex-wrap: wrap; gap: 10px; }
+    .doc-card { flex: 1 1 45%; border: 1px solid #b2dfdb; background: #e0f2f1; padding: 10px; border-radius: 5px; font-size: 10pt; }
+    .doc-name { font-weight: bold; color: #00695c; font-size: 11pt; margin-bottom: 5px; display: block; }
+    .doc-row { margin-bottom: 4px; display: flex; align-items: flex-start; gap: 5px; }
+    .doc-icon { width: 15px; text-align: center; }
+    .doc-link { color: #004d40; text-decoration: underline; }
+
+    .med-card { border: 1px solid #ccc; border-radius: 6px; padding: 10px; margin-bottom: 10px; background-color: #fff; page-break-inside: avoid; }
+    .med-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px; }
+    .med-name { font-weight: bold; font-size: 11pt; }
+    .med-badge { font-size: 8pt; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; font-weight: bold; }
+    .med-desc { font-size: 10pt; line-height: 1.4; color: #333; margin-top: 5px; }
+    .severe { border-left: 5px solid #d32f2f; background: #ffebee; } .severe .med-badge { background: #d32f2f; color: white; }
+    .moderate { border-left: 5px solid #fbc02d; background: #fffde7; } .moderate .med-badge { background: #fbc02d; color: #333; }
+    .mild { border-left: 5px solid #2196f3; background: #e3f2fd; } .mild .med-badge { background: #2196f3; color: white; }
+
+    .contact-grid { display: flex; flex-wrap: wrap; gap: 5px; }
+    .contact-card { flex: 0 0 30%; border: 1px solid #ddd; border-radius: 5px; padding: 6px; background: #fdfdfd; font-size: 9.5pt; }
+    .c-name { font-weight: bold; color: #333; }
+    .c-rel { font-size: 8.5pt; color: #666; text-transform: uppercase; margin-bottom: 4px; }
+    .c-phone a { text-decoration: none; color: #fff; background-color: #333; padding: 3px 8px; border-radius: 10px; font-size: 9pt; }
+
+    .learn-card { border-left: 5px solid #673ab7; background-color: #f3e5f5; padding: 10px; border-radius: 4px; margin-bottom: 10px; }
+    .learn-heading { font-size: 9pt; font-weight: bold; text-transform: uppercase; color: #4a148c; margin-bottom: 4px; margin-top: 8px; }
+    .learn-diag { color: #333; margin-bottom: 8px; white-space: pre-wrap; font-size: 10pt; }
+    .learn-tags { display: flex; flex-wrap: wrap; gap: 5px; }
+    .learn-tag { background: #fff; border: 1px solid #d1c4e9; color: #512da8; padding: 3px 8px; border-radius: 12px; font-size: 9pt; font-weight: bold; }
+    .no-learn { color: #888; font-style: italic; font-size: 10pt; }
+
+    .footer { position: absolute; bottom: 0; left: 0; right: 0; text-align: right; font-size: 8pt; color: #aaa; padding-top: 10px; border-top: 1px solid #eee; }
+
+    /* DIETARY REQUIREMENTS TABLE */
+    .dietary-table { width: 100%; border-collapse: collapse; font-size: 10pt; margin-bottom: 20px; }
+    .dietary-table th { background: #4caf50; color: white; border: 1px solid #388e3c; padding: 8px; text-align: left; font-size: 10pt; }
+    .dietary-table td { border: 1px solid #ccc; padding: 8px; vertical-align: top; }
+    .dietary-table td.student-name { font-weight: bold; width: 25%; }
+    .dietary-table td.dietary-req { font-size: 9.5pt; line-height: 1.4; }
+    .dietary-no-data { color: #333; font-weight: bold; }  /* No data given - bold */
+    .dietary-no-concerns { color: #999; font-style: italic; }  /* No concerns listed - faded gray */
+    .dietary-text { color: #333; }  /* Has actual dietary requirements */
+
+    /* ATTACHMENT PAGES (New) */
+    .attachment-page {
+        page-break-before: always;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        /* Fit tightly to A4 with margins */
+        height: 95vh; 
+        width: 100%;
+    }
+    .attachment-img {
+        max-width: 100%;
+        max-height: 100%;
+        object-fit: contain; /* Scales down if too big, but keeps aspect ratio */
+        border: 1px solid #ddd;
+    }
+    .att-label {
+        margin-bottom: 10px;
+        font-size: 9pt;
+        color: #777;
+        text-transform: uppercase;
+        letter-spacing: 1px;
+    }
+
+</style>
+</head>
+<body>
+
+    <div class="cover">
+        <h1>{{ title }}</h1>
+        <p>Generated {{ date }}</p>
+        <div class="conf">CONFIDENTIAL – Destroy securely after use</div>
+    </div>
+    <div class="page-break"></div>
+
+    <div class="photo-grid" id="photo-index">
+        {% for s in students %}
+        <a href="#student-{{s.link_id}}" class="grid-item no-break">
+            {% if s.photo %}
+                <img class="grid-img" src="data:image/jpeg;base64,{{s.photo}}">
+            {% else %}
+                <div class="grid-img" style="display:flex;align-items:center;justify-content:center;color:#ccc;font-size:10px;">NO PHOTO</div>
+            {% endif %}
+            <div class="grid-name">{{ s.first }}<br>{{ s.last }}</div>
+        </a>
+        {% endfor %}
+    </div>
+    <div class="page-break"></div>
+
+    {% if options.dietary %}
+    <h3>Dietary Requirements</h3>
+    <table class="dietary-table">
+        <thead>
+            <tr>
+                <th>Student</th>
+                <th>Dietary Requirements</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in students %}
+            <tr class="no-break">
+                <td class="student-name"><a href="#student-{{s.link_id}}" style="font-weight:bold;">{{ s.first }} {{ s.last }}</a></td>
+                <td class="dietary-req">
+                    {% if s.dietary == "No data given" %}
+                        <span class="dietary-no-data">No data given</span>
+                    {% elif s.dietary == "No concerns listed" %}
+                        <span class="dietary-no-concerns">No concerns listed</span>
+                    {% else %}
+                        <span class="dietary-text">{{ s.dietary }}</span>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="page-break"></div>
+    {% endif %}
+
+    <h3>Quick Medical Overview</h3>
+    <table class="matrix-table">
+        <thead>
+            <tr>
+                <th width="20%">Student</th>
+                <th width="30%">Primary Emergency Contact</th>
+                <th width="8%">Asthma</th>
+                <th width="8%">Allergy</th>
+                <th width="8%">Anaphylaxis</th>
+                <th width="18%">Swimming Ability</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in matrix %}
+            <tr>
+                <td><a href="#student-{{row.link_id}}" style="font-weight:bold;">{{ row.name }}</a></td>
+                <td>{{ row.contact }}</td>
+                <td class="center">{% if row.asthma %}<span class="check-mark">X</span>{% endif %}</td>
+                <td class="center">{% if row.allergy %}<span class="check-mark">X</span>{% endif %}</td>
+                <td class="center">{% if row.anaphylaxis %}<span class="red-cross">X</span>{% endif %}</td>
+                <td class="center"><span class="{{ row.swim_color }}">{{ row.swimming }}</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="page-break"></div>
+
+    <h3>Medical Condition Summary</h3>
+    <table class="summary-table">
+        <thead>
+            <tr>
+                <th width="25%">Student</th>
+                <th>Conditions & Details</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in medical_full %}
+            <tr class="no-break">
+                <td><a href="#student-{{item.link_id}}" style="font-weight:bold;">{{ item.name }}</a></td>
+                <td>
+                    <ul class="summary-list">
+                    {% for cond in item.conditions %}
+                        <li>
+                            <strong>{{ cond.name }}</strong>
+                            <span class="sum-sev">({{ cond.severity }})</span>
+                            <span class="sum-desc">{{ cond.description }}</span>
+                        </li>
+                    {% endfor %}
+                    </ul>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div class="page-break"></div>
+
+    {% for s in students %}
+    
+    <div class="profile" id="student-{{ s.link_id }}">
+        <div class="profile-header">
+            <div class="ph-left">
+                {% if s.photo %}
+                    <img class="profile-photo" src="data:image/jpeg;base64,{{ s.photo }}" />
+                {% else %}
+                    <div class="profile-no-photo">NO PHOTO</div>
+                {% endif %}
+                
+                <div class="info">
+                    <h1>{{ s.first }} {{ s.last }}</h1>
+                    <div class="meta">
+                        <div class="meta-row">
+                            {% if options.year %}<span><label>Year:</label>{{ s.year }}</span>{% endif %}
+                            {% if options.roll %}<span><label>Roll:</label>{{ s.roll }}</span>{% endif %}
+                            {% if options.house and s.house %}<span><label>House:</label>{{ s.house }}</span>{% endif %}
+                        </div>
+                        <div class="meta-row">
+                            <span><label>Swimming:</label><span class="{{ s.swim_color }}">{{ s.swimming }}</span></span>
+                        </div>
+                        {% if options.dob and s.dob %}<div class="meta-row"><span><label>DOB:</label>{{ s.dob }}</span></div>{% endif %}
+                        {% if options.tutor and s.tutor %}<div class="meta-row"><span><label>Tutor:</label>{{ s.tutor }}</span></div>{% endif %}
+                        {% if options.sid %}<div class="meta-row"><span><label>Student ID:</label>{{ s.id }}</span></div>{% endif %}
+                    </div>
+                </div>
+            </div>
+            <a href="#photo-index" class="back-btn">⬆ Back to Photos</a>
+        </div>
+
+        {% for sec in s.sections %}
+        <h3>{{ sec.title }}</h3>
+        
+        {% if sec.type == 'medical_cards' %}
+            {% if sec.content|length == 0 %}
+                <p style="color:#777; font-style:italic;">No medical conditions listed.</p>
+            {% else %}
+                {% for cond in sec.content %}
+                <div class="med-card {{ cond.css_class }}">
+                    <div class="med-header">
+                        <span class="med-name">{{ cond.name }}</span>
+                        <span class="med-badge">{{ cond.severity }}</span>
+                    </div>
+                    <div class="med-desc">{{ cond.description }}</div>
+                </div>
+                {% endfor %}
+            {% endif %}
+        
+        {% elif sec.type == 'doctor_grid' %}
+            {% if sec.content|length == 0 %}
+                <p style="color:#777; font-style:italic;">No medical contacts listed.</p>
+            {% else %}
+                <div class="doc-grid">
+                    {% for doc in sec.content %}
+                    <div class="doc-card">
+                        <span class="doc-name">{{ doc.name }}</span>
+                        <div class="doc-row">
+                            <span class="doc-icon">📍</span>
+                            {% if doc.map_link %}<a href="{{ doc.map_link }}" target="_blank" class="doc-link">{{ doc.address }}</a>
+                            {% else %}<span>{{ doc.address }}</span>{% endif %}
+                        </div>
+                        <div class="doc-row">
+                            <span class="doc-icon">📞</span>
+                            {% if doc.phone_link %}<a href="{{ doc.phone_link }}" class="doc-link">{{ doc.phone_display }}</a>
+                            {% else %}<span>{{ doc.phone_display }}</span>{% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+
+        {% elif sec.type == 'emergency_grid' %}
+            <div class="contact-grid">
+                {% if sec.content|length == 0 %}<p>No emergency contacts listed.</p>
+                {% else %}
+                    {% for c in sec.content %}
+                    <div class="contact-card">
+                        <div class="c-name">{{ c.name }}</div>
+                        <div class="c-rel">{{ c.relation }}</div>
+                        <div class="c-phone"><a href="{{ c.phone.link }}">📞 {{ c.phone.display }}</a></div>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+            </div>
+
+        {% elif sec.type == 'home_contacts' %}
+            {% if sec.content.contacts|length > 0 %}
+            <div class="contact-grid">
+                {% for c in sec.content.contacts %}
+                <div class="contact-card">
+                    <div class="c-name">{{ c.name }}</div>
+                    <div class="c-rel">{{ c.relation }}</div>
+                    {% if c.phone %}
+                    <div class="c-phone"><a href="{{ c.phone.link }}">📞 {{ c.phone.display }}</a></div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+            {% if sec.content.home_address or sec.content.home_phone %}
+            <div style="margin-top: 10px; padding: 8px; background: #f5f5f5; border-radius: 4px; font-size: 10pt;">
+                {% if sec.content.home_address %}
+                <div style="margin-bottom: 4px;"><strong>Home Address:</strong> {{ sec.content.home_address }}</div>
+                {% endif %}
+                {% if sec.content.home_phone %}
+                <div><strong>Home Phone:</strong> <a href="tel:{{ sec.content.home_phone|replace(' ', '')|replace('-', '') }}" style="color: #333;">📞 {{ sec.content.home_phone }}</a></div>
+                {% endif %}
+            </div>
+            {% endif %}
+            {% if sec.content.contacts|length == 0 and not sec.content.home_address and not sec.content.home_phone %}
+            <p style="color:#777; font-style:italic;">No home contact information available.</p>
+            {% endif %}
+
+        {% elif sec.type == 'learning_support' %}
+            {% if sec.content %}
+                <div class="learn-card">
+                    <div class="learn-heading">Learning Alert</div>
+                    <div class="learn-diag">{{ sec.content.diagnosis }}</div>
+                    {% if sec.content.accommodations %}
+                    <div class="learn-heading">Adjustments</div>
+                    <div class="learn-tags">
+                        {% for tag in sec.content.accommodations %}
+                        <span class="learn-tag">{{ tag }}</span>
+                        {% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+            {% else %}
+                <p class="no-learn">No learning support alerts.</p>
+            {% endif %}
+
+        {% else %}
+            {% for line in sec.content %}
+            <p>{{ line }}</p>
+            {% endfor %}
+        {% endif %}
+
+        {% endfor %}
+        <div class="footer">Field Kit Generated {{ date }} | Student: {{ s.first }} {{ s.last }}</div>
+    </div>
+    
+    {% if s.attachments %}
+        {% for img_b64 in s.attachments %}
+        <div class="attachment-page">
+            <div class="att-label">Attached Document</div>
+            <img class="attachment-img" src="data:image/jpeg;base64,{{ img_b64 }}" />
+        </div>
+        {% endfor %}
+    {% endif %}
+
+    <div class="page-break"></div>
+    {% endfor %}
+
+</body>
+</html>
