@@ -67,7 +67,7 @@ TEMPLATE_DIR = os.path.join(BASE_DIR, "templates")
 TEMP_DIR = os.path.join(BASE_DIR, "_temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-st.set_page_config(page_title="Student Field Kit Generator", layout="wide")
+st.set_page_config(page_title="Medical Booklet Creator", layout="wide", page_icon="📋")
 
 try:
     with open("config.yaml", "r") as f:
@@ -1323,47 +1323,294 @@ def image_to_a4_pdf(upload):
         st.error(f"Error converting image to PDF: {e}")
         return None
 
-# ---------------- UI ----------------
-st.title("🎓 Student Field Kit Generator")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# UI — Medical Booklet Creator
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Custom CSS ────────────────────────────────────────────────────────────────
+st.markdown("""
+<style>
+  /* ── Global typography & background ── */
+  [data-testid="stAppViewContainer"] { background: #f8f9fc; }
+  [data-testid="stSidebar"] { display: none; }
+
+  /* ── Header bar ── */
+  .mbc-header {
+    background: #ffffff;
+    border-bottom: 1px solid #e8eaf0;
+    padding: 18px 0 14px 0;
+    margin-bottom: 28px;
+  }
+  .mbc-header-inner {
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 0 24px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+  }
+  .mbc-title {
+    font-size: 1.25rem;
+    font-weight: 650;
+    color: #1a1d2e;
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+  .mbc-subtitle {
+    font-size: 0.78rem;
+    color: #9295a8;
+    margin: 0;
+    font-weight: 400;
+  }
+
+  /* ── Tab styling ── */
+  [data-testid="stTabs"] [role="tablist"] {
+    gap: 4px;
+    border-bottom: 2px solid #e8eaf0;
+    padding-bottom: 0;
+  }
+  [data-testid="stTabs"] [role="tab"] {
+    font-size: 0.85rem !important;
+    font-weight: 500 !important;
+    color: #6b6f82 !important;
+    padding: 8px 18px !important;
+    border-radius: 6px 6px 0 0 !important;
+    border: none !important;
+    background: transparent !important;
+  }
+  [data-testid="stTabs"] [role="tab"][aria-selected="true"] {
+    color: #2d5be3 !important;
+    border-bottom: 2px solid #2d5be3 !important;
+    background: transparent !important;
+  }
+
+  /* ── Section headers ── */
+  .section-head {
+    font-size: 0.72rem;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #9295a8;
+    margin: 28px 0 12px 0;
+    padding-bottom: 8px;
+    border-bottom: 1px solid #e8eaf0;
+  }
+
+  /* ── Upload cards ── */
+  .upload-card {
+    background: #ffffff;
+    border: 1px solid #e8eaf0;
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-bottom: 10px;
+  }
+  .upload-card-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: #1a1d2e;
+    margin-bottom: 4px;
+  }
+  .upload-card-desc {
+    font-size: 0.76rem;
+    color: #9295a8;
+    margin-bottom: 10px;
+  }
+  .seqta-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: #2d5be3;
+    text-decoration: none;
+    background: #eef2fd;
+    border: 1px solid #c5d5f8;
+    border-radius: 5px;
+    padding: 3px 9px;
+    margin-bottom: 8px;
+  }
+
+  /* ── Step badge ── */
+  .step-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px; height: 24px;
+    background: #2d5be3;
+    color: white;
+    border-radius: 50%;
+    font-size: 0.75rem;
+    font-weight: 650;
+    margin-right: 8px;
+    flex-shrink: 0;
+  }
+  .step-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .step-label {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #1a1d2e;
+  }
+
+  /* ── Options grid ── */
+  .options-card {
+    background: #ffffff;
+    border: 1px solid #e8eaf0;
+    border-radius: 10px;
+    padding: 18px 20px;
+    margin-bottom: 12px;
+  }
+  .options-card-title {
+    font-size: 0.8rem;
+    font-weight: 650;
+    color: #4a4d62;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+
+  /* ── Footer ── */
+  .mbc-footer {
+    margin-top: 48px;
+    padding-top: 16px;
+    border-top: 1px solid #e8eaf0;
+    text-align: center;
+    font-size: 0.75rem;
+    color: #b0b3c4;
+  }
+
+  /* ── Streamlit element overrides ── */
+  [data-testid="stFileUploader"] {
+    background: #fafbff;
+    border-radius: 8px;
+  }
+  div[data-testid="stCheckbox"] label { font-size: 0.88rem !important; }
+  div[data-testid="stSelectbox"] label { font-size: 0.88rem !important; }
+  .stButton > button[kind="primary"] {
+    background: #2d5be3 !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-weight: 600 !important;
+    padding: 10px 28px !important;
+    font-size: 0.9rem !important;
+  }
+  .stButton > button[kind="primary"]:hover {
+    background: #2450cc !important;
+  }
+  .stButton > button:not([kind="primary"]) {
+    border-radius: 7px !important;
+    font-size: 0.86rem !important;
+  }
+  [data-testid="stTextInput"] input {
+    border-radius: 8px !important;
+    font-size: 0.9rem !important;
+  }
+  div.stAlert {
+    border-radius: 8px !important;
+    font-size: 0.85rem !important;
+  }
+</style>
+""", unsafe_allow_html=True)
+
+# ── Header ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="mbc-header">
+  <div class="mbc-header-inner">
+    <span class="mbc-title">📋 Medical Booklet Creator</span>
+    <span class="mbc-subtitle">Created by Thomas van Sant</span>
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+SEQTA_URL = "https://teach.friends.tas.edu.au/studentSummary/reporting"
+
 if "attachments" not in st.session_state: st.session_state.attachments = {}
 if "project_title" not in st.session_state: st.session_state.project_title = ""
 
-t1, t2 = st.tabs(["1. Setup", "2. Process & Generate"])
+t1, t2 = st.tabs(["  Setup  ", "  Process & Generate  "])
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 1 — SETUP
+# ═══════════════════════════════════════════════════════════════════════════════
 with t1:
-    st.session_state.project_title = st.text_input("Project Title", st.session_state.project_title)
-    
-    # --- PRIMARY UPLOADS ---
-    csv = st.file_uploader("📋 Upload Student List CSV (Seqta)", type="csv")
-    photos = st.file_uploader("📸 Upload Students Photos PDF (Seqta)", type="pdf")
-    
-    # --- OPTIONAL UPLOADS ---
-    st.markdown("### Optional but Beneficial Documents")
-    contact_csv = st.file_uploader("📝 Upload Attendance CSV (Paperly)", type="csv")
-    swimming_csv = st.file_uploader("🏊 Upload Swimming Ability CSV (Paperly)", type="csv")
-    dietary_csv = st.file_uploader("🍽️ Upload Dietary Requirements CSV (Paperly)", type="csv")
 
+    st.session_state.project_title = st.text_input(
+        "Booklet title",
+        st.session_state.project_title,
+        placeholder="e.g. Year 9 Camp — March 2025"
+    )
+
+    # ── Required documents ────────────────────────────────────────────────────
+    st.markdown('<div class="section-head">Required — from Seqta</div>', unsafe_allow_html=True)
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.markdown(f"""
+        <div class="upload-card">
+          <div class="upload-card-label">Student List CSV</div>
+          <div class="upload-card-desc">Student data including medical, emergency and learning information.</div>
+          <a class="seqta-link" href="{SEQTA_URL}" target="_blank">↗ Open in Seqta</a>
+        </div>
+        """, unsafe_allow_html=True)
+        csv = st.file_uploader("Student List CSV", type="csv", label_visibility="collapsed")
+
+    with col_b:
+        st.markdown(f"""
+        <div class="upload-card">
+          <div class="upload-card-label">Student Photos PDF</div>
+          <div class="upload-card-desc">Photo contact sheet exported from Seqta.</div>
+          <a class="seqta-link" href="{SEQTA_URL}" target="_blank">↗ Open in Seqta</a>
+        </div>
+        """, unsafe_allow_html=True)
+        photos = st.file_uploader("Student Photos PDF", type="pdf", label_visibility="collapsed")
+
+    # ── Optional documents ────────────────────────────────────────────────────
+    st.markdown('<div class="section-head">Optional — from Paperly forms</div>', unsafe_allow_html=True)
+
+    col_c, col_d, col_e = st.columns(3)
+    with col_c:
+        st.markdown("""
+        <div class="upload-card">
+          <div class="upload-card-label">Attendance CSV</div>
+          <div class="upload-card-desc">Adds home contacts and addresses to each profile.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        contact_csv = st.file_uploader("Attendance CSV", type="csv", label_visibility="collapsed")
+
+    with col_d:
+        st.markdown("""
+        <div class="upload-card">
+          <div class="upload-card-label">Swimming Ability CSV</div>
+          <div class="upload-card-desc">Adds swimming competency to each student profile.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        swimming_csv = st.file_uploader("Swimming Ability CSV", type="csv", label_visibility="collapsed")
+
+    with col_e:
+        st.markdown("""
+        <div class="upload-card">
+          <div class="upload-card-label">Dietary Requirements CSV</div>
+          <div class="upload-card-desc">Adds dietary needs and generates a summary table.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        dietary_csv = st.file_uploader("Dietary Requirements CSV", type="csv", label_visibility="collapsed")
+
+    # ── File processing (logic unchanged) ─────────────────────────────────────
     if csv:
-        # 1. Load Main Data
         df_temp = pd.read_csv(csv).fillna("")
-
-        # 2. Merge Contact Data (If uploaded)
         if contact_csv:
             try:
                 contact_df = pd.read_csv(contact_csv).fillna("")
-                # Store for later use in swimming matching
                 st.session_state.contact_csv_df = contact_df
-                
-                # Get keys from config
                 c_map = CONFIG.get('contact_file_mappings', {})
                 id_col = COLS['student_id']
                 join_key = c_map.get('join_key', 'ID')
-
-                # Force IDs to string to ensure matches
                 df_temp[id_col] = df_temp[id_col].astype(str).str.strip()
                 contact_df[join_key] = contact_df[join_key].astype(str).str.strip()
-
-                # Select only the columns we need from contact file (avoid duplicates)
                 contact_cols_needed = [
                     join_key,
                     c_map.get('sc1_name_pref', 'SC1 Preferred'),
@@ -1375,12 +1622,8 @@ with t1:
                     c_map.get('address', 'Contact Address'),
                     c_map.get('home_phone', 'Home Phone')
                 ]
-                
-                # Only keep columns that exist in the contact file
                 contact_cols_to_merge = [col for col in contact_cols_needed if col in contact_df.columns]
                 contact_df_subset = contact_df[contact_cols_to_merge]
-
-                # Merge
                 df_temp = pd.merge(df_temp, contact_df_subset, left_on=id_col, right_on=join_key, how='left')
                 print(f"\n=== CONTACT MERGE DEBUG ===")
                 print(f"Columns after merge: {list(df_temp.columns)}")
@@ -1388,81 +1631,71 @@ with t1:
                 st.success(f"✅ Merged contacts for {len(contact_df)} students")
             except Exception as e:
                 st.error(f"Error merging contacts: {e}")
-
-        # 3. Save to Session State
         st.session_state.df = df_temp
         st.session_state.df_final = st.session_state.df
-        st.success("CSV Loaded")
-    
+        st.success("✅ Student list loaded")
+
     if swimming_csv:
         st.session_state.swimming_csv = swimming_csv
-        st.success("Swimming Ability CSV Loaded")
-    
+        st.success("✅ Swimming ability CSV loaded")
+
     if dietary_csv:
         st.session_state.dietary_csv = dietary_csv
-        st.success("Dietary Requirements CSV Loaded")
-    
+        st.success("✅ Dietary requirements CSV loaded")
+
     if photos:
         path = os.path.join(TEMP_DIR, "photos.pdf")
         with open(path, "wb") as f: f.write(photos.getbuffer())
         st.session_state.photo_pdf = path
-        st.success("Photos Loaded")
+        st.success("✅ Photos loaded")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 2 — PROCESS & GENERATE
+# ═══════════════════════════════════════════════════════════════════════════════
 with t2:
-    # Validate inputs
+
     if "df_final" not in st.session_state or "photo_pdf" not in st.session_state:
-        st.info("Please upload a CSV and Photo PDF in the 'Setup' tab first.")
+        st.info("Upload a Student List CSV and Photos PDF in the Setup tab first.")
         st.stop()
 
     df_final = st.session_state.df_final
     photo_pdf_path = st.session_state.photo_pdf
 
-    # ==========================================
-    # STEP 1: ANALYZE
-    # ==========================================
-    st.markdown("### Step 1: Analyze Photos")
-    
-    # Only show this button if we haven't extracted yet OR if user wants to re-run
-    if st.button("🔍 Check PDF & Analyze Geometry", type="primary"):
-        with st.spinner("Scanning..."):
+    # ── Step 1: Analyse ───────────────────────────────────────────────────────
+    st.markdown('<div class="section-head">Step 1 — Analyse photos</div>', unsafe_allow_html=True)
+
+    if st.button("Scan & Match Photos", type="primary"):
+        with st.spinner("Scanning PDF and matching photos to students…"):
             results, unmatched = extract_photos_geometric(photo_pdf_path, df_final)
             st.session_state.auto_matches = results
             st.session_state.unmatched_data = unmatched
             st.session_state.extraction_done = True
-            st.session_state.manual_selections = {} 
+            st.session_state.manual_selections = {}
             st.session_state.detected_plans = detect_medical_plans(df_final)
-            
-            # Process swimming ability if uploaded
+
             if 'swimming_csv' in st.session_state:
-                # Pass contact_csv if available, otherwise None
                 contact_data = st.session_state.get('contact_csv_df', None)
                 swim_matched, swim_unmatched = match_swimming_ability(df_final, st.session_state.swimming_csv, contact_data)
                 st.session_state.swimming_matched = swim_matched
                 st.session_state.swimming_unmatched = swim_unmatched
                 st.session_state.swimming_manual_selections = {}
-            
-            # Process dietary requirements if uploaded
+
             if 'dietary_csv' in st.session_state:
                 dietary_matched, dietary_unmatched = match_dietary_requirements(df_final, st.session_state.dietary_csv)
                 st.session_state.dietary_matched = dietary_matched
                 st.session_state.dietary_unmatched = dietary_unmatched
                 st.session_state.dietary_manual_selections = {}
-            
-            st.rerun() 
 
-    # ONLY SHOW STEPS 2-4 IF EXTRACTION IS DONE
+            st.rerun()
+
     if st.session_state.get("extraction_done", False):
-        
-        # ==========================================
-        # STEP 2: REVIEW
-        # ==========================================
-        st.divider()
-        st.subheader("2. 📸 Review Photo Matches")
-        
-        student_options = ["(Skip)"]
-        name_to_id_map = {} 
-        id_to_name_map = {}
 
+        # ── Step 2: Review photos ─────────────────────────────────────────────
+        st.markdown('<div class="section-head">Step 2 — Review matches</div>', unsafe_allow_html=True)
+
+        student_options = ["(Skip)"]
+        name_to_id_map = {}
+        id_to_name_map = {}
         for _, row in df_final.iterrows():
             sid = str(row[COLS['student_id']])
             label = f"{row[COLS['surname']]}, {row[COLS['first_name']]} ({sid})"
@@ -1470,245 +1703,189 @@ with t2:
             name_to_id_map[label] = sid
             id_to_name_map[sid] = f"{row[COLS['first_name']]} {row[COLS['surname']]}"
 
-        if st.session_state.unmatched_data:
-            with st.expander(f"Review {len(st.session_state.unmatched_data)} Unmatched Photos", expanded=True):
+        # Photos
+        n_auto = len(st.session_state.auto_matches)
+        n_unmatched = len(st.session_state.unmatched_data)
+        if n_unmatched > 0:
+            with st.expander(f"⚠️  {n_unmatched} photos need manual matching  ({n_auto} matched automatically)", expanded=True):
                 for item in st.session_state.unmatched_data:
                     c1, c2 = st.columns([1, 4])
-                    with c1: st.image(item['path'], width=100)
+                    with c1: st.image(item['path'], width=90)
                     with c2:
-                        st.caption(f"Page {item['page']}. Text: *{item['text_found']}*")
-                        box_key = f"select_{item['path']}"
-                        sel = st.selectbox("Assign to:", options=student_options, key=box_key)
+                        st.caption(f"Page {item['page']} · Text nearby: *{item['text_found']}*")
+                        sel = st.selectbox("Assign to student:", options=student_options, key=f"select_{item['path']}")
                         if sel != "(Skip)":
                             st.session_state.manual_selections[item['path']] = name_to_id_map[sel]
                         elif item['path'] in st.session_state.manual_selections:
                             del st.session_state.manual_selections[item['path']]
                     st.divider()
         else:
-            st.success("All photos matched automatically.")
+            st.success(f"✅ All {n_auto} photos matched automatically")
 
-        # ==========================================
-        # STEP 2B: REVIEW SWIMMING ABILITY MATCHES
-        # ==========================================
+        # Swimming
         if 'swimming_csv' in st.session_state:
-            st.divider()
-            st.subheader("2B. 🏊 Review Swimming Ability Matches")
-            
-            total_matched = len(st.session_state.get('swimming_matched', {}))
-            total_unmatched = len(st.session_state.get('swimming_unmatched', []))
-            
-            if total_unmatched > 0:
-                with st.expander(f"Review {total_unmatched} Unmatched Swimming Records", expanded=True):
-                    st.info("These swimming records couldn't be matched automatically to students. Please assign them manually.")
-                    
+            total_swim_matched = len(st.session_state.get('swimming_matched', {}))
+            total_swim_unmatched = len(st.session_state.get('swimming_unmatched', []))
+            if total_swim_unmatched > 0:
+                with st.expander(f"⚠️  {total_swim_unmatched} swimming records need manual matching", expanded=True):
+                    st.caption("These records couldn't be matched automatically — please assign them below.")
                     for item in st.session_state.swimming_unmatched:
                         c1, c2 = st.columns([1, 3])
                         with c1:
-                            st.markdown(f"**Student Name:** {item['student_name']}")
+                            st.markdown(f"**{item['student_name']}**")
                         with c2:
-                            ability_color = get_swimming_display_color(item['ability'])
                             color_map = {'swim-cannot': '🔴', 'swim-weak': '🟠', 'swim-ok': '🟢', 'swim-none': '⚪'}
-                            st.markdown(f"{color_map.get(ability_color, '⚪')} **Swimming:** {item['ability']}")
-                            
-                            box_key = f"swim_select_{item['index']}"
-                            sel = st.selectbox("Assign to student:", options=student_options, key=box_key)
+                            ability_color = get_swimming_display_color(item['ability'])
+                            st.markdown(f"{color_map.get(ability_color, '⚪')} {item['ability']}")
+                            sel = st.selectbox("Assign to student:", options=student_options, key=f"swim_select_{item['index']}")
                             if sel != "(Skip)":
                                 st.session_state.swimming_manual_selections[item['index']] = name_to_id_map[sel]
                             elif item['index'] in st.session_state.swimming_manual_selections:
                                 del st.session_state.swimming_manual_selections[item['index']]
                         st.divider()
             else:
-                st.success(f"✅ All {total_matched} swimming abilities matched automatically!")
-                if total_matched > 0:
-                    st.info("No manual matching needed. All swimming records were successfully matched to students.")
+                st.success(f"✅ All {total_swim_matched} swimming records matched automatically")
 
-        # ==========================================
-        # STEP 2C: REVIEW DIETARY REQUIREMENTS MATCHES
-        # ==========================================
+        # Dietary
         if 'dietary_csv' in st.session_state:
-            st.divider()
-            st.subheader("2C. 🍽️ Review Dietary Requirements Matches")
-            
-            total_matched = len(st.session_state.get('dietary_matched', {}))
-            total_unmatched = len(st.session_state.get('dietary_unmatched', []))
-            
-            if total_unmatched > 0:
-                with st.expander(f"Review {total_unmatched} Unmatched Dietary Records", expanded=True):
-                    st.info("These dietary records couldn't be matched automatically to students. Please assign them manually.")
-                    
+            total_diet_matched = len(st.session_state.get('dietary_matched', {}))
+            total_diet_unmatched = len(st.session_state.get('dietary_unmatched', []))
+            if total_diet_unmatched > 0:
+                with st.expander(f"⚠️  {total_diet_unmatched} dietary records need manual matching", expanded=True):
+                    st.caption("These records couldn't be matched automatically — please assign them below.")
                     for item in st.session_state.dietary_unmatched:
                         c1, c2 = st.columns([1, 3])
                         with c1:
-                            st.markdown(f"**Student Name:** {item['student_name']}")
+                            st.markdown(f"**{item['student_name']}**")
                         with c2:
-                            # Show a preview of the dietary requirement
-                            preview = item['dietary_req'][:100] + "..." if len(item['dietary_req']) > 100 else item['dietary_req']
-                            st.markdown(f"🍽️ **Dietary:** {preview}")
-                            
-                            box_key = f"dietary_select_{item['index']}"
-                            sel = st.selectbox("Assign to student:", options=student_options, key=box_key)
+                            preview = item['dietary_req'][:100] + "…" if len(item['dietary_req']) > 100 else item['dietary_req']
+                            st.markdown(f"🍽️ {preview}")
+                            sel = st.selectbox("Assign to student:", options=student_options, key=f"dietary_select_{item['index']}")
                             if sel != "(Skip)":
                                 st.session_state.dietary_manual_selections[item['index']] = name_to_id_map[sel]
                             elif item['index'] in st.session_state.dietary_manual_selections:
                                 del st.session_state.dietary_manual_selections[item['index']]
                         st.divider()
             else:
-                st.success(f"✅ All {total_matched} dietary requirements matched automatically!")
-                if total_matched > 0:
-                    st.info("No manual matching needed. All dietary records were successfully matched to students.")
+                st.success(f"✅ All {total_diet_matched} dietary records matched automatically")
 
-        # ==========================================
-        # STEP 3: MEDICAL PLANS
-        # ==========================================
-        st.divider()
-        st.subheader("3. 🏥 Medical Action Plans")
-        st.info("Upload Action Plans. Links found in CSV are provided.")
+        # ── Step 3: Medical plans ─────────────────────────────────────────────
+        st.markdown('<div class="section-head">Step 3 — Medical action plans</div>', unsafe_allow_html=True)
 
         detected = st.session_state.get('detected_plans', {})
-        
         if detected:
             for sid, plans in detected.items():
                 s_name = id_to_name_map.get(sid, sid)
                 with st.container():
-                    st.markdown(f"#### 👤 {s_name}")
+                    st.markdown(f"**{s_name}**")
                     for p_idx, plan in enumerate(plans):
                         col1, col2 = st.columns([3, 2])
                         with col1:
                             st.markdown(f"**{plan['condition']}**")
-                            if plan.get('url'): st.markdown(f"🔗 [Open Link]({plan['url']})")
+                            if plan.get('url'): st.markdown(f"[↗ Open document]({plan['url']})")
                         with col2:
-                            k = f"plan_upload_{sid}_{p_idx}"
-                            st.file_uploader(f"Upload {plan['condition']}", type=['pdf','png','jpg'], key=k)
+                            st.file_uploader(f"Upload {plan['condition']}", type=['pdf','png','jpg'], key=f"plan_upload_{sid}_{p_idx}")
                     st.divider()
         else:
-            st.write("No specific plans detected.")
+            st.caption("No action plans detected in student data.")
 
-        # Manual Add
-        with st.expander("➕ Manually Add Plan"):
-            st.caption("Select a student and upload a file. (This resets on refresh, add right before generating)")
-            man_sel = st.selectbox("Select Student", sorted(list(name_to_id_map.keys()))[1:]) 
-            st.file_uploader("Upload File", type=['pdf','png','jpg'], key="manual_plan_file")
+        with st.expander("Add a plan manually"):
+            st.caption("Select a student and upload a file. Add right before generating.")
+            man_sel = st.selectbox("Select student", sorted(list(name_to_id_map.keys()))[1:])
+            st.file_uploader("Upload file", type=['pdf','png','jpg'], key="manual_plan_file")
 
-# ==========================================
-        # STEP 4: CONFIGURE CONTENT
-        # ==========================================
-        st.divider()
-        st.subheader("4. ⚙️ Profile Content Options")
-        
-        c1, c2 = st.columns(2)
-        with c1:
-            st.markdown("**Header Details**")
-            opt_year = st.checkbox("Year Level", value=True)
-            opt_roll = st.checkbox("Roll Group", value=True)
-            opt_house = st.checkbox("House", value=True)
-            opt_dob = st.checkbox("Date of Birth", value=True)
-            opt_tutor = st.checkbox("Tutor", value=True)
-            opt_sid = st.checkbox("Student ID", value=True)
-            
-            # Show swimming, dietary, and home contacts options if respective CSVs were uploaded
-            has_swimming = 'swimming_csv' in st.session_state
-            has_dietary = 'dietary_csv' in st.session_state
-            has_contact_csv = 'contact_csv_df' in st.session_state
-            
+        # ── Step 4: Content options ───────────────────────────────────────────
+        st.markdown('<div class="section-head">Step 4 — Content options</div>', unsafe_allow_html=True)
+
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown('<div class="options-card-title">Header details</div>', unsafe_allow_html=True)
+            opt_year  = st.checkbox("Year level",    value=True)
+            opt_roll  = st.checkbox("Roll group",    value=True)
+            opt_house = st.checkbox("House",         value=True)
+            opt_dob   = st.checkbox("Date of birth", value=True)
+            opt_tutor = st.checkbox("Tutor",         value=True)
+            opt_sid   = st.checkbox("Student ID",    value=True)
+
+            has_swimming     = 'swimming_csv' in st.session_state
+            has_dietary      = 'dietary_csv' in st.session_state
+            has_contact_csv  = 'contact_csv_df' in st.session_state
+
             if has_swimming or has_dietary or has_contact_csv:
-                st.markdown("**Additional Data**")
-                
-            if has_swimming:
-                opt_swimming = st.checkbox("Swimming Ability", value=True)
-            else:
-                opt_swimming = False
-            
-            if has_dietary:
-                opt_dietary = st.checkbox("Dietary Requirements", value=True)
-            else:
-                opt_dietary = False
-            
-            if has_contact_csv:
-                opt_sec_home = st.checkbox("Home Contacts", value=True)
-            else:
-                opt_sec_home = False
-                
-        with c2:
-            st.markdown("**Profile Sections**")
-            opt_sec_med = st.checkbox("Medical Information", value=True)
-            opt_sec_emerg = st.checkbox("Emergency Contacts", value=True)
-            opt_sec_docs = st.checkbox("Medical Contacts (Doctors)", value=True)
-            opt_sec_learn = st.checkbox("Learning & Support", value=True)
+                st.markdown("---")
+                st.markdown('<div class="options-card-title">Additional data</div>', unsafe_allow_html=True)
+            opt_swimming = st.checkbox("Swimming ability",      value=True) if has_swimming else False
+            opt_dietary  = st.checkbox("Dietary requirements",  value=True) if has_dietary  else False
+            opt_sec_home = st.checkbox("Home contacts",         value=True) if has_contact_csv else False
 
-        # ==========================================
-        # STEP 5: SORT & OUTPUT (NEW)
-        # ==========================================
-        st.divider()
-        st.subheader("5. 📑 Sort & Output Settings")
-        
-        c3, c4 = st.columns(2)
-        with c3:
-            sort_by = st.selectbox("Sort Students By:", ["Alphabetical (Surname)", "Roll Group", "House", "Year Level"])
-        with c4:
-            # Logic: If sorting alphabetically, splitting doesn't make sense (A-Z split is rare).
-            # If sorting by Group/House/Year, allow splitting by that category.
+        with col2:
+            st.markdown('<div class="options-card-title">Profile sections</div>', unsafe_allow_html=True)
+            opt_sec_med   = st.checkbox("Medical information",         value=True)
+            opt_sec_emerg = st.checkbox("Emergency contacts",          value=True)
+            opt_sec_docs  = st.checkbox("Medical contacts (doctors)",  value=True)
+            opt_sec_learn = st.checkbox("Learning & support",          value=True)
+
+        # ── Step 5: Sort & output ─────────────────────────────────────────────
+        st.markdown('<div class="section-head">Step 5 — Sort & output</div>', unsafe_allow_html=True)
+
+        col3, col4 = st.columns(2)
+        with col3:
+            sort_by = st.selectbox("Sort students by:", ["Alphabetical (Surname)", "Roll Group", "House", "Year Level"])
+        with col4:
             if sort_by == "Alphabetical (Surname)":
                 output_mode = "Single Document"
-                st.caption("Sorting alphabetically generates a single combined document.")
+                st.caption("Alphabetical sorting produces a single combined document.")
             else:
-                output_mode = st.radio("Output Mode:", ["Single Document", f"Split into multiple files (by {sort_by})"])
+                output_mode = st.radio("Output:", ["Single Document", f"Split by {sort_by}"])
 
-        st.divider()
+        st.markdown("")
 
-        if st.button("📄 Generate Field Kit", type="primary"):
-            
-            # --- 1. GATHER PLANS (Deduplicated) ---
-            plan_map = {} 
-            
-            # Auto-detected
+        if st.button("Generate Medical Booklet", type="primary"):
+
+            # ── Gather plans (logic unchanged) ───────────────────────────────
+            plan_map = {}
             detected = st.session_state.get('detected_plans', {})
             if detected:
                 for sid, plans in detected.items():
                     for idx, _ in enumerate(plans):
                         k = f"plan_upload_{sid}_{idx}"
                         f = st.session_state.get(k)
-                        if f: 
+                        if f:
                             if sid not in plan_map: plan_map[sid] = []
                             if f not in plan_map[sid]: plan_map[sid].append(f)
-            
-            # Manual (List)
+
             if "medical_plan_files" in st.session_state:
                 for sid, fl in st.session_state.medical_plan_files.items():
                     if sid not in plan_map: plan_map[sid] = []
-                    for f in fl: 
+                    for f in fl:
                         if f not in plan_map[sid]: plan_map[sid].append(f)
 
-            # Manual (Single Box)
             if st.session_state.get("manual_plan_file") and "man_sel" in locals() and man_sel:
                 msid = name_to_id_map[man_sel]
                 mf = st.session_state.get("manual_plan_file")
                 if msid not in plan_map: plan_map[msid] = []
                 if mf not in plan_map[msid]: plan_map[msid].append(mf)
 
-            # --- 2. PREPARE ALL DATA ---
+            # ── Prepare data maps (logic unchanged) ──────────────────────────
             final_photo_map = st.session_state.auto_matches.copy()
             for p, s in st.session_state.manual_selections.items(): final_photo_map[s] = p
-            
-            # Consolidate swimming ability (auto + manual)
+
             final_swimming_map = st.session_state.get('swimming_matched', {}).copy()
             if st.session_state.get('swimming_manual_selections'):
                 for swim_idx, student_id in st.session_state.swimming_manual_selections.items():
-                    # Find the ability for this index
                     for item in st.session_state.swimming_unmatched:
                         if item['index'] == swim_idx:
                             final_swimming_map[student_id] = item['ability']
                             break
-            
-            # Consolidate dietary requirements (auto + manual)
+
             final_dietary_map = st.session_state.get('dietary_matched', {}).copy()
             if st.session_state.get('dietary_manual_selections'):
                 for dietary_idx, student_id in st.session_state.dietary_manual_selections.items():
-                    # Find the dietary requirement for this index
                     for item in st.session_state.dietary_unmatched:
                         if item['index'] == dietary_idx:
                             final_dietary_map[student_id] = item['dietary_req']
                             break
-            
+
             print(f"\n{'='*80}")
             print("SWIMMING ABILITY MAP FOR PDF GENERATION")
             print(f"{'='*80}")
@@ -1721,15 +1898,18 @@ with t2:
                 print("⚠️  WARNING: No swimming abilities found!")
                 print("   Check that swimming CSV was uploaded and analyzed")
             print(f"{'='*80}\n")
-            
-            status = st.status("Processing Data...", expanded=True)
+
+            # ── Render (logic unchanged) ──────────────────────────────────────
+            status = st.status("Generating booklet…", expanded=True)
             env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
             tpl = env.get_template("profiles.html")
-            display_opts = {"year": opt_year, "roll": opt_roll, "house": opt_house, "dob": opt_dob, "tutor": opt_tutor, "sid": opt_sid, "swimming": opt_swimming, "dietary": opt_dietary}
+            display_opts = {
+                "year": opt_year, "roll": opt_roll, "house": opt_house,
+                "dob": opt_dob, "tutor": opt_tutor, "sid": opt_sid,
+                "swimming": opt_swimming, "dietary": opt_dietary
+            }
 
-            # We build a list of "Record Objects" first, so we can sort/group them later
-            all_records = [] 
-
+            all_records = []
             total = len(df_final)
             prog = st.progress(0)
 
@@ -1737,8 +1917,7 @@ with t2:
                 prog.progress((idx+1)/total)
                 sid = str(r[COLS['student_id']])
                 link_id = re.sub(r'[^a-zA-Z0-9]', '', sid) or f"row{idx}"
-                
-                # Basic Parsing
+
                 fname, sname = r[COLS['first_name']], r[COLS['surname']]
                 dob = str(r.get('Birth date', r.get('Birth Date', ''))).strip()
                 try: dob = datetime.strptime(dob, '%Y-%m-%d').strftime('%d %b %Y')
@@ -1748,60 +1927,49 @@ with t2:
                 year_lvl = str(r[COLS['year']])
                 roll = str(r[COLS['rollgroup']])
 
-                # Content Parsing
-                raw_med = str(r.get(COLS['medical_notes'], ""))
+                raw_med   = str(r.get(COLS['medical_notes'], ""))
                 raw_emerg = str(r.get(COLS['emergency_notes'], ""))
-                parsed_med = parse_medical_text(raw_med)
-                parsed_con = parse_emergency_contacts(raw_emerg)
-                parsed_home = parse_home_contacts(r)  # NEW: Parse home contacts
-                
-                # Build Sections
+                parsed_med  = parse_medical_text(raw_med)
+                parsed_con  = parse_emergency_contacts(raw_emerg)
+                parsed_home = parse_home_contacts(r)
+
                 sections = []
                 layout = CONFIG["default_profile_layout"]
                 for sec in layout:
                     is_med = COLS['medical_notes'] in sec['fields']
                     is_emg = COLS['emergency_notes'] in sec['fields']
                     is_lrn = COLS['special_notes'] in sec['fields']
-                    if is_med and opt_sec_med: sections.append({"title": sec['section'], "type": "medical_cards", "content": parsed_med})
+                    if is_med and opt_sec_med:
+                        sections.append({"title": sec['section'], "type": "medical_cards", "content": parsed_med})
                     elif is_emg:
-                        # NEW: Add Home Contacts section BEFORE Emergency Contacts (if enabled)
                         if opt_sec_home and (parsed_home['contacts'] or parsed_home['home_address'] or parsed_home['home_phone']):
                             sections.append({"title": "Home Contacts", "type": "home_contacts", "content": parsed_home})
-                        
-                        if opt_sec_emerg: sections.append({"title": sec['section'], "type": "emergency_grid", "content": parsed_con})
+                        if opt_sec_emerg:
+                            sections.append({"title": sec['section'], "type": "emergency_grid", "content": parsed_con})
                         if opt_sec_docs:
                             d_col = "Doctor notes" if "Doctor notes" in r else COLS.get('doctor_details')
-                            if d_col and d_col in r: sections.append({"title": "Medical Contacts", "type": "doctor_grid", "content": parse_doctors(str(r.get(d_col, "")))})
-                    elif is_lrn and opt_sec_learn: sections.append({"title": sec['section'], "type": "learning_support", "content": parse_learning_support(str(r.get(COLS['special_notes'], "")))})
+                            if d_col and d_col in r:
+                                sections.append({"title": "Medical Contacts", "type": "doctor_grid", "content": parse_doctors(str(r.get(d_col, "")))})
+                    elif is_lrn and opt_sec_learn:
+                        sections.append({"title": sec['section'], "type": "learning_support", "content": parse_learning_support(str(r.get(COLS['special_notes'], "")))})
                     elif not (is_med or is_emg or is_lrn):
                         vals = [str(r.get(f,"")).strip() for f in sec['fields'] if str(r.get(f,"")).strip()]
                         if not vals: vals = ["No data supplied."]
                         sections.append({"title": sec['section'], "type": "text", "content": vals})
 
-                # Embed Attachments (convert all to images/Base64)
                 embedded = []
                 if sid in plan_map:
-                    for f in plan_map[sid]:
-                        embedded.extend(convert_file_to_images(f))
+                    for f in plan_map[sid]: embedded.extend(convert_file_to_images(f))
                 if sid in st.session_state.attachments:
-                    for f in st.session_state.attachments[sid]:
-                        embedded.extend(convert_file_to_images(f))
+                    for f in st.session_state.attachments[sid]: embedded.extend(convert_file_to_images(f))
 
-                # Create Objects
                 med_l = raw_med.lower()
                 c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phone']['display']})" if parsed_con else ""
-                
-                # Get swimming ability
+
                 swim_ability = final_swimming_map.get(sid, "Data not recorded")
-                swim_color = get_swimming_display_color(swim_ability)
-                
-                # Get dietary requirements
-                # Three states: 
-                # 1. Has dietary info → show it
-                # 2. In CSV but empty/N/A → "No concerns listed" (they filled form)
-                # 3. Not in CSV at all → "No data given" (didn't fill form)
-                dietary_req = final_dietary_map.get(sid, "No data given")
-                
+                swim_color   = get_swimming_display_color(swim_ability)
+                dietary_req  = final_dietary_map.get(sid, "No data given")
+
                 profile_obj = {
                     "id": sid, "link_id": link_id, "first": fname, "last": sname,
                     "year": year_lvl, "roll": roll, "house": house, "dob": dob, "tutor": tutor,
@@ -1810,56 +1978,37 @@ with t2:
                     "photo": img_to_base64(final_photo_map.get(sid)),
                     "sections": sections, "attachments": embedded
                 }
-                
                 matrix_obj = {
                     "id": sid, "link_id": link_id, "name": f"{sname}, {fname}",
-                    "contact": c_disp, "asthma": "asthma" in med_l, 
+                    "contact": c_disp, "asthma": "asthma" in med_l,
                     "allergy": "allergy" in med_l, "anaphylaxis": "anaphylaxis" in med_l,
                     "swimming": swim_ability, "swim_color": swim_color
                 }
-                
                 medical_obj = None
                 if parsed_med:
                     medical_obj = {"name": f"{fname} {sname}", "link_id": link_id, "conditions": parsed_med}
-                
-                # Store everything with sorting keys
+
                 all_records.append({
-                    "profile": profile_obj,
-                    "matrix": matrix_obj,
-                    "medical": medical_obj,
-                    "sort_keys": {
-                        "alpha": sname + fname,
-                        "roll": roll,
-                        "house": house,
-                        "year": year_lvl
-                    }
+                    "profile": profile_obj, "matrix": matrix_obj, "medical": medical_obj,
+                    "sort_keys": {"alpha": sname + fname, "roll": roll, "house": house, "year": year_lvl}
                 })
 
-            # --- 3. SORT & GROUP LOGIC ---
-            status.write("Sorting & Grouping...")
-            
-            # Helper to render a PDF from a list of records
+            # ── Sort & group (logic unchanged) ────────────────────────────────
+            status.write("Sorting & grouping…")
+
             def render_subset(records, title_suffix=""):
-                s_list = [r['profile'] for r in records]
-                m_list = [r['matrix'] for r in records]
+                s_list   = [r['profile'] for r in records]
+                m_list   = [r['matrix']  for r in records]
                 med_list = [r['medical'] for r in records if r['medical']]
-                
-                # Matrix always alphabetical
                 m_list.sort(key=lambda x: x['name'])
-                
-                # Simple single-pass rendering - all attachments are now images embedded in HTML
                 full_html = tpl.render(
                     title=f"{st.session_state.project_title} {title_suffix}",
                     date=datetime.now().strftime("%d %B %Y"),
-                    students=s_list,
-                    matrix=m_list,
-                    medical_full=med_list,
-                    options=display_opts,
-                    mode="full"
+                    students=s_list, matrix=m_list, medical_full=med_list,
+                    options=display_opts, mode="full"
                 )
                 return HTML(string=full_html).write_pdf()
 
-            # Determine Sort Key and Grouping
             if sort_by == "Roll Group":
                 all_records.sort(key=lambda x: (str(x['sort_keys']['roll']), x['sort_keys']['alpha']))
                 group_key = 'roll'
@@ -1869,36 +2018,37 @@ with t2:
             elif sort_by == "Year Level":
                 all_records.sort(key=lambda x: (str(x['sort_keys']['year']), x['sort_keys']['alpha']))
                 group_key = 'year'
-            else: # Alphabetical
+            else:
                 all_records.sort(key=lambda x: x['sort_keys']['alpha'])
                 group_key = 'alpha'
 
-            # --- 4. OUTPUT ---
             if "Split" in output_mode:
-                # MULTIPLE FILES (ZIP)
-                status.write("Generating Multiple PDFs...")
+                status.write("Generating split PDFs…")
                 zip_buffer = BytesIO()
-                
-                # Group records
                 groups = {}
                 for r in all_records:
                     k = r['sort_keys'][group_key]
                     if not k: k = "Unknown"
                     if k not in groups: groups[k] = []
                     groups[k].append(r)
-                
                 with zipfile.ZipFile(zip_buffer, "w") as zf:
                     for g_name, g_records in groups.items():
                         safe_name = re.sub(r'[^a-zA-Z0-9]', '_', str(g_name))
-                        pdf_data = render_subset(g_records, title_suffix=f"- {g_name}")
-                        zf.writestr(f"Field_Kit_{safe_name}.pdf", pdf_data)
-                
-                status.update(label="✅ All Files Generated!", state="complete", expanded=False)
-                st.download_button("⬇️ Download ZIP", data=zip_buffer.getvalue(), file_name="Field_Kit_Split.zip", mime="application/zip")
-                
+                        pdf_data = render_subset(g_records, title_suffix=f"— {g_name}")
+                        zf.writestr(f"Medical_Booklet_{safe_name}.pdf", pdf_data)
+                status.update(label="✅ All files generated", state="complete", expanded=False)
+                st.download_button("⬇ Download ZIP", data=zip_buffer.getvalue(),
+                                   file_name="Medical_Booklets.zip", mime="application/zip")
             else:
-                # SINGLE FILE
-                status.write("Generating Single PDF...")
+                status.write("Generating PDF…")
                 pdf_data = render_subset(all_records)
-                status.update(label="✅ PDF Generated!", state="complete", expanded=False)
-                st.download_button("⬇️ Download PDF", data=pdf_data, file_name="Field_Kit_Full.pdf", mime="application/pdf")
+                status.update(label="✅ Booklet ready", state="complete", expanded=False)
+                st.download_button("⬇ Download Medical Booklet", data=pdf_data,
+                                   file_name="Medical_Booklet.pdf", mime="application/pdf")
+
+# ── Footer ────────────────────────────────────────────────────────────────────
+st.markdown("""
+<div class="mbc-footer">
+  Medical Booklet Creator &nbsp;·&nbsp; Created by Thomas van Sant
+</div>
+""", unsafe_allow_html=True)
