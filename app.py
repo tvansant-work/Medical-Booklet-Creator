@@ -1461,63 +1461,60 @@ st.markdown("""
 # The Streamlit columns row sits ON TOP of it with a negative top margin
 # to pull it up into the painted area. Zero React issues, zero div injection.
 
+
+# ── Sticky header: columns row that sticks to top on scroll ─────────────────
+# `position: sticky` works within Streamlit's layout flow — no fighting the
+# layout engine, no chin gap, no scroll-away. The gradient is on the row itself.
+
 st.markdown("""
 <style>
-  /* ── Gradient band painted on the body — spans full width always ── */
-  [data-testid="stAppViewContainer"]::before {
-    content: "";
-    display: block;
-    position: fixed;
-    top: 0; left: 0; right: 0;
-    height: 64px;
-    background: linear-gradient(135deg, #1a7f6e 0%, #2563a8 100%);
-    z-index: 0;
+  /* ── Make the very first horizontal block sticky ── */
+  [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]
+    > [data-testid="stVerticalBlockBorderWrapper"]:first-child {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 999 !important;
   }
-
-  /* ── Pull the first columns block up into the painted band ── */
-  [data-testid="stMainBlockContainer"] > div:first-child
-    > [data-testid="stVerticalBlock"]
-    > [data-testid="stVerticalBlockBorderWrapper"]:first-child
-    > div > div
-    > [data-testid="stHorizontalBlock"] {
-    position: relative;
-    z-index: 1;
-    margin-top: -4rem;
-    padding: 0 1rem;
-    height: 64px;
-    align-items: center !important;
-    gap: 0 !important;
+  [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]
+    > [data-testid="stVerticalBlockBorderWrapper"]:first-child > div {
+    background: linear-gradient(135deg, #1a7f6e 0%, #2563a8 100%) !important;
+    padding: 12px 24px !important;
+    margin: -4rem -4rem 0 -4rem !important;
   }
-
-  /* ── Title text in the header ── */
-  .mbc-title-text {
+  /* Text in the title column */
+  [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]
+    > [data-testid="stVerticalBlockBorderWrapper"]:first-child p {
     color: #ffffff !important;
-    font-size: 1.15rem !important;
-    font-weight: 650 !important;
     margin: 0 !important;
-    line-height: 1 !important;
+    line-height: 1.3 !important;
   }
-  .mbc-subtitle-text {
+  /* Caption under title */
+  [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]
+    > [data-testid="stVerticalBlockBorderWrapper"]:first-child
+      [data-testid="stCaptionContainer"] p {
     color: rgba(255,255,255,0.55) !important;
-    font-size: 0.74rem !important;
+    font-size: 0.72rem !important;
     font-weight: 400 !important;
-    line-height: 1 !important;
-    margin: 0 !important;
-    display: block !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
   }
-
-  /* ── ⋯ popover trigger button: ghost on gradient ── */
-  [data-testid="stPopover"] > button {
+  /* ⋯ popover button ghost style */
+  [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]
+    > [data-testid="stVerticalBlockBorderWrapper"]:first-child
+      [data-testid="stPopover"] > button {
     background: rgba(255,255,255,0.15) !important;
     border: 1px solid rgba(255,255,255,0.32) !important;
     color: #ffffff !important;
     border-radius: 7px !important;
     font-size: 1rem !important;
-    padding: 5px 13px !important;
+    padding: 6px 12px !important;
     min-height: unset !important;
     line-height: 1 !important;
+    float: right !important;
   }
-  [data-testid="stPopover"] > button:hover {
+  [data-testid="stMainBlockContainer"] > div > [data-testid="stVerticalBlock"]
+    > [data-testid="stVerticalBlockBorderWrapper"]:first-child
+      [data-testid="stPopover"] > button:hover {
     background: rgba(255,255,255,0.26) !important;
   }
 
@@ -1526,7 +1523,7 @@ st.markdown("""
     padding: 6px 0 10px !important;
     min-width: 195px !important;
   }
-  /* Section label rows */
+  /* Section label */
   [data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"] p {
     font-size: 0.67rem !important;
     font-weight: 700 !important;
@@ -1549,27 +1546,9 @@ st.markdown("""
     color: #1a1d2e !important;
     cursor: pointer !important;
     box-sizing: border-box !important;
-    border-radius: 0 !important;
     line-height: 1.2 !important;
   }
   [data-testid="stPopoverBody"] [data-testid="stButton"] > button:hover {
-    background: #f2f3f7 !important;
-    color: #1a7f6e !important;
-  }
-  /* Link button */
-  [data-testid="stPopoverBody"] [data-testid="stLinkButton"] a {
-    all: unset !important;
-    display: flex !important;
-    align-items: center !important;
-    width: 100% !important;
-    padding: 9px 14px !important;
-    font-size: 0.88rem !important;
-    font-weight: 500 !important;
-    color: #1a1d2e !important;
-    cursor: pointer !important;
-    box-sizing: border-box !important;
-  }
-  [data-testid="stPopoverBody"] [data-testid="stLinkButton"] a:hover {
     background: #f2f3f7 !important;
     color: #1a7f6e !important;
   }
@@ -1591,7 +1570,8 @@ st.markdown("""
 
 _h1, _h2 = st.columns([11, 1])
 with _h1:
-    st.markdown('<p class="mbc-title-text">📋 Medical Booklet Creator</p><span class="mbc-subtitle-text">Created by Thomas van Sant</span>', unsafe_allow_html=True)
+    st.markdown("**📋 Medical Booklet Creator**")
+    st.caption("Created by Thomas van Sant")
 with _h2:
     with st.popover("•••"):
         st.markdown("Actions")
@@ -1618,10 +1598,10 @@ if st.session_state.get("_show_help"):
     with st.container(border=True):
         st.markdown("**Quick help**")
         st.markdown("""
-- **Launch the app:** Double-click **Open Medical Booklet.command** in your `Documents/medical-booklet` folder, or drag it to your Dock for one-click access.
+- **Launch:** Double-click **Open Medical Booklet.command** in `Documents/medical-booklet`, or click it in your Dock.
 - **Stop the app:** Find the Terminal window and press **Ctrl + C**.
-- **Seqta data:** Both required files (Student List CSV and Photos PDF) come from [Seqta Reporting](https://teach.friends.tas.edu.au/studentSummary/reporting).
-- **Start fresh:** Use **Start Over** in this menu to clear all uploads and begin again.
+- **Seqta data:** Both required files come from [Seqta Reporting](https://teach.friends.tas.edu.au/studentSummary/reporting).
+- **Start fresh:** Use **Start Over** in the ••• menu to clear all uploads and begin again.
         """)
         if st.button("✕  Close help"):
             st.session_state._show_help = False
@@ -1630,7 +1610,7 @@ if st.session_state.get("_show_help"):
 if st.session_state.get("_show_about"):
     with st.container(border=True):
         st.markdown("**📋 Medical Booklet Creator**")
-        st.markdown("Generates student profile PDFs for excursion and field activity planning — including medical information, emergency contacts, learning support needs, swimming ability and dietary requirements.")
+        st.markdown("Generates student profile PDFs for excursion and field activity planning — medical information, emergency contacts, learning support, swimming ability and dietary requirements.")
         st.caption("Created by Thomas van Sant · Friends' School")
         if st.button("✕  Close"):
             st.session_state._show_about = False
