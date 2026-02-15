@@ -1340,11 +1340,17 @@ def image_to_a4_pdf(upload):
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-  /* ── Hide Streamlit top toolbar completely ── */
+  /* ── Hide Streamlit toolbar & kill the chin gap it leaves ── */
   [data-testid="stToolbar"],
   [data-testid="stDecoration"],
   #MainMenu,
-  header { display: none !important; visibility: hidden !important; }
+  header { display: none !important; }
+
+  /* Remove the top padding gap left behind by the hidden header */
+  [data-testid="stAppViewContainer"] > section > div:first-child {
+    padding-top: 0 !important;
+  }
+  .block-container { padding-top: 0 !important; }
 
   /* ── Global background ── */
   [data-testid="stAppViewContainer"] { background: #f5f6fa; }
@@ -1353,134 +1359,41 @@ st.markdown("""
   /* ── Header bar — warm teal gradient ── */
   .mbc-header {
     background: linear-gradient(135deg, #1a7f6e 0%, #2563a8 100%);
-    padding: 20px 0 16px 0;
-    margin-bottom: 28px;
-    border-radius: 0 0 14px 14px;
-  }
-  .mbc-header-inner {
-    max-width: 960px;
-    margin: 0 auto;
-    padding: 0 28px;
+    padding: 18px 28px 16px 28px;
+    margin-bottom: 24px;
     display: flex;
     align-items: center;
     justify-content: space-between;
   }
   .mbc-title {
-    font-size: 1.3rem;
+    font-size: 1.2rem;
     font-weight: 650;
     color: #ffffff;
     letter-spacing: -0.01em;
-    margin: 0;
   }
   .mbc-subtitle {
     font-size: 0.78rem;
     color: rgba(255,255,255,0.6);
-    margin: 0;
     font-weight: 400;
   }
 
-  /* ── Custom floating menu button ── */
-  .mbc-menu-wrap {
-    position: relative;
-    display: inline-block;
+  /* ── Style the native Streamlit popover button in the header ── */
+  .mbc-menu-area [data-testid="stPopover"] button {
+    background: rgba(255,255,255,0.18) !important;
+    border: 1px solid rgba(255,255,255,0.35) !important;
+    color: #ffffff !important;
+    border-radius: 8px !important;
+    font-size: 1.1rem !important;
+    padding: 4px 12px !important;
+    min-height: unset !important;
   }
-  .mbc-menu-btn {
-    background: rgba(255,255,255,0.18);
-    border: 1px solid rgba(255,255,255,0.3);
-    border-radius: 8px;
-    color: #ffffff;
-    cursor: pointer;
-    font-size: 1.15rem;
-    padding: 5px 10px;
-    line-height: 1;
-    transition: background 0.15s;
-    font-family: inherit;
+  .mbc-menu-area [data-testid="stPopover"] button:hover {
+    background: rgba(255,255,255,0.28) !important;
   }
-  .mbc-menu-btn:hover { background: rgba(255,255,255,0.28); }
-
-  .mbc-dropdown {
-    display: none;
-    position: absolute;
-    right: 0;
-    top: calc(100% + 6px);
-    background: #ffffff;
-    border: 1px solid #e2e5ee;
-    border-radius: 10px;
-    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
-    min-width: 220px;
-    z-index: 9999;
-    overflow: hidden;
-  }
-  .mbc-dropdown.open { display: block; }
-
-  .mbc-menu-header {
-    padding: 10px 14px 8px;
-    font-size: 0.68rem;
-    font-weight: 650;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #9295a8;
-    border-bottom: 1px solid #f0f1f6;
-  }
-  .mbc-menu-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 14px;
-    font-size: 0.85rem;
-    color: #1a1d2e;
-    cursor: pointer;
-    transition: background 0.1s;
-    border: none;
-    background: none;
-    width: 100%;
-    text-align: left;
-    font-family: inherit;
-    text-decoration: none;
-  }
-  .mbc-menu-item:hover { background: #f5f6fa; }
-  .mbc-menu-item .mi-icon { font-size: 1rem; flex-shrink: 0; }
-  .mbc-menu-item .mi-label { flex: 1; font-weight: 500; }
-  .mbc-menu-item .mi-desc { font-size: 0.73rem; color: #9295a8; display: block; }
-  .mbc-menu-divider { border: none; border-top: 1px solid #f0f1f6; margin: 4px 0; }
-
-  /* About panel */
-  .mbc-about {
-    display: none;
-    position: fixed;
-    top: 50%; left: 50%;
-    transform: translate(-50%, -50%);
-    background: #fff;
-    border: 1px solid #e2e5ee;
-    border-radius: 14px;
-    box-shadow: 0 16px 48px rgba(0,0,0,0.18);
-    padding: 28px 32px;
-    z-index: 10000;
-    max-width: 400px;
-    width: 90%;
-  }
-  .mbc-about.open { display: block; }
-  .mbc-overlay {
-    display: none;
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,0.3);
-    z-index: 9998;
-  }
-  .mbc-overlay.open { display: block; }
-  .mbc-about-title {
-    font-size: 1rem; font-weight: 650; color: #1a1d2e;
-    margin-bottom: 10px;
-  }
-  .mbc-about-body {
-    font-size: 0.85rem; color: #4a4d62; line-height: 1.6;
-    margin-bottom: 18px;
-  }
-  .mbc-about-close {
-    background: #1a7f6e; color: #fff; border: none;
-    border-radius: 7px; padding: 8px 18px;
-    font-size: 0.85rem; font-weight: 600;
-    cursor: pointer; font-family: inherit;
+  /* Popover panel styling */
+  [data-testid="stPopoverBody"] {
+    padding: 6px 0 !important;
+    min-width: 210px !important;
   }
 
   /* ── Tab styling ── */
@@ -1587,98 +1500,38 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Header + custom menu ─────────────────────────────────────────────────────
+# ── Header ───────────────────────────────────────────────────────────────────
 st.markdown("""
-<div class="mbc-overlay" id="mbcOverlay" onclick="closeAll()"></div>
-
-<div class="mbc-about" id="mbcAbout">
-  <div class="mbc-about-title">📋 Medical Booklet Creator</div>
-  <div class="mbc-about-body">
-    Built for Friends&#39; School excursion and field activity planning.<br><br>
-    Generates student profile PDFs containing medical information, emergency contacts,
-    learning support needs, swimming ability and dietary requirements.<br><br>
-    <strong>Created by Thomas van Sant.</strong><br>
-    Contact your IT coordinator or the app creator for support.
-  </div>
-  <button class="mbc-about-close" onclick="closeAll()">Close</button>
-</div>
-
 <div class="mbc-header">
-  <div class="mbc-header-inner">
+  <div>
     <span class="mbc-title">📋 Medical Booklet Creator</span>
-    <div class="mbc-menu-wrap">
-      <button class="mbc-menu-btn" onclick="toggleMenu()" title="Menu">⋯</button>
-      <div class="mbc-dropdown" id="mbcDropdown">
-        <div class="mbc-menu-header">Options</div>
-
-        <button class="mbc-menu-item" onclick="reloadApp()">
-          <span class="mi-icon">🔄</span>
-          <span class="mi-label">Start over<span class="mi-desc">Clear all uploads and reset</span></span>
-        </button>
-
-        <hr class="mbc-menu-divider">
-        <div class="mbc-menu-header">Help</div>
-
-        <a class="mbc-menu-item" href="https://teach.friends.tas.edu.au/studentSummary/reporting" target="_blank" onclick="closeAll()">
-          <span class="mi-icon">↗</span>
-          <span class="mi-label">Open Seqta<span class="mi-desc">Student data &amp; reports</span></span>
-        </a>
-
-        <button class="mbc-menu-item" onclick="showKeyboard()">
-          <span class="mi-icon">⌨️</span>
-          <span class="mi-label">Keyboard shortcut<span class="mi-desc">Open app without Terminal</span></span>
-        </button>
-
-        <button class="mbc-menu-item" onclick="showStopHelp()">
-          <span class="mi-icon">⏹</span>
-          <span class="mi-label">How to stop the app<span class="mi-desc">Close the app when finished</span></span>
-        </button>
-
-        <hr class="mbc-menu-divider">
-
-        <button class="mbc-menu-item" onclick="showAbout()">
-          <span class="mi-icon">ℹ️</span>
-          <span class="mi-label">About<span class="mi-desc">Medical Booklet Creator</span></span>
-        </button>
-      </div>
-    </div>
   </div>
+  <span class="mbc-subtitle">Created by Thomas van Sant</span>
 </div>
-
-<script>
-function toggleMenu() {
-  document.getElementById('mbcDropdown').classList.toggle('open');
-}
-function closeAll() {
-  document.getElementById('mbcDropdown').classList.remove('open');
-  document.getElementById('mbcAbout').classList.remove('open');
-  document.getElementById('mbcOverlay').classList.remove('open');
-}
-function showAbout() {
-  closeAll();
-  document.getElementById('mbcAbout').classList.add('open');
-  document.getElementById('mbcOverlay').classList.add('open');
-}
-function reloadApp() {
-  closeAll();
-  window.location.reload();
-}
-function showKeyboard() {
-  closeAll();
-  alert('To open the app quickly:\n\n1. Open Finder\n2. Go to Documents → medical-booklet\n3. Double-click  Open Medical Booklet.command\n\nThe app will open in your browser automatically.');
-}
-function showStopHelp() {
-  closeAll();
-  alert('To stop the app:\n\n1. Find the Terminal window that opened when you launched\n2. Press  Ctrl + C\n3. You can then close Terminal\n\nThe app will stop and localhost:8501 will no longer work.');
-}
-document.addEventListener('click', function(e) {
-  var wrap = document.querySelector('.mbc-menu-wrap');
-  if (wrap && !wrap.contains(e.target)) {
-    document.getElementById('mbcDropdown').classList.remove('open');
-  }
-});
-</script>
 """, unsafe_allow_html=True)
+
+# ── Menu (native Streamlit popover — React safe) ──────────────────────────────
+# Positioned using columns so it floats right without breaking layout
+_mc1, _mc2 = st.columns([6, 1])
+with _mc2:
+    with st.popover("⋯", use_container_width=False):
+        st.markdown("**Options**")
+        if st.button("🔄  Start over", use_container_width=True, help="Clear all uploads and reset"):
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
+            st.rerun()
+        st.divider()
+        st.markdown("**Help**")
+        st.link_button(
+            "↗  Open Seqta",
+            "https://teach.friends.tas.edu.au/studentSummary/reporting",
+            use_container_width=True
+        )
+        st.info("**To stop the app:** Go to the Terminal window and press **Ctrl + C**, then close Terminal.")
+        st.info("**To open without Terminal:** Double-click **Open Medical Booklet.command** in your medical-booklet folder, or drag it to your Dock.")
+        st.divider()
+        st.markdown("**About**")
+        st.caption("Medical Booklet Creator — built for Friends' School excursion and field activity planning. Created by Thomas van Sant.")
 
 SEQTA_URL = "https://teach.friends.tas.edu.au/studentSummary/reporting"
 
