@@ -1340,61 +1340,17 @@ def image_to_a4_pdf(upload):
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-  /* ── Hide Streamlit toolbar & kill the chin gap it leaves ── */
+  /* ── Hide Streamlit toolbar & kill the chin gap ── */
   [data-testid="stToolbar"],
   [data-testid="stDecoration"],
   #MainMenu,
   header { display: none !important; }
-
-  /* Remove the top padding gap left behind by the hidden header */
-  [data-testid="stAppViewContainer"] > section > div:first-child {
-    padding-top: 0 !important;
-  }
+  [data-testid="stAppViewContainer"] > section > div:first-child { padding-top: 0 !important; }
   .block-container { padding-top: 0 !important; }
 
   /* ── Global background ── */
   [data-testid="stAppViewContainer"] { background: #f5f6fa; }
   [data-testid="stSidebar"] { display: none; }
-
-  /* ── Header bar — warm teal gradient ── */
-  .mbc-header {
-    background: linear-gradient(135deg, #1a7f6e 0%, #2563a8 100%);
-    padding: 18px 28px 16px 28px;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-  .mbc-title {
-    font-size: 1.2rem;
-    font-weight: 650;
-    color: #ffffff;
-    letter-spacing: -0.01em;
-  }
-  .mbc-subtitle {
-    font-size: 0.78rem;
-    color: rgba(255,255,255,0.6);
-    font-weight: 400;
-  }
-
-  /* ── Style the native Streamlit popover button in the header ── */
-  .mbc-menu-area [data-testid="stPopover"] button {
-    background: rgba(255,255,255,0.18) !important;
-    border: 1px solid rgba(255,255,255,0.35) !important;
-    color: #ffffff !important;
-    border-radius: 8px !important;
-    font-size: 1.1rem !important;
-    padding: 4px 12px !important;
-    min-height: unset !important;
-  }
-  .mbc-menu-area [data-testid="stPopover"] button:hover {
-    background: rgba(255,255,255,0.28) !important;
-  }
-  /* Popover panel styling */
-  [data-testid="stPopoverBody"] {
-    padding: 6px 0 !important;
-    min-width: 210px !important;
-  }
 
   /* ── Tab styling ── */
   [data-testid="stTabs"] [role="tablist"] {
@@ -1450,7 +1406,7 @@ st.markdown("""
   }
   .seqta-link:hover { background: #d0ede9; }
 
-  /* ── Step / options badges ── */
+  /* ── Options / step badges ── */
   .step-badge {
     display: inline-flex; align-items: center; justify-content: center;
     width: 24px; height: 24px; background: #1a7f6e; color: white;
@@ -1500,38 +1456,186 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Header ───────────────────────────────────────────────────────────────────
+# ── Header + Menu ─────────────────────────────────────────────────────────────
+# Strategy: paint the page top with a CSS body::before gradient band.
+# The Streamlit columns row sits ON TOP of it with a negative top margin
+# to pull it up into the painted area. Zero React issues, zero div injection.
+
 st.markdown("""
-<div class="mbc-header">
-  <div>
-    <span class="mbc-title">📋 Medical Booklet Creator</span>
-  </div>
-  <span class="mbc-subtitle">Created by Thomas van Sant</span>
-</div>
+<style>
+  /* ── Gradient band painted on the body — spans full width always ── */
+  [data-testid="stAppViewContainer"]::before {
+    content: "";
+    display: block;
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 64px;
+    background: linear-gradient(135deg, #1a7f6e 0%, #2563a8 100%);
+    z-index: 0;
+  }
+
+  /* ── Pull the first columns block up into the painted band ── */
+  [data-testid="stMainBlockContainer"] > div:first-child
+    > [data-testid="stVerticalBlock"]
+    > [data-testid="stVerticalBlockBorderWrapper"]:first-child
+    > div > div
+    > [data-testid="stHorizontalBlock"] {
+    position: relative;
+    z-index: 1;
+    margin-top: -4rem;
+    padding: 0 1rem;
+    height: 64px;
+    align-items: center !important;
+    gap: 0 !important;
+  }
+
+  /* ── Title text in the header ── */
+  .mbc-title-text {
+    color: #ffffff !important;
+    font-size: 1.15rem !important;
+    font-weight: 650 !important;
+    margin: 0 !important;
+    line-height: 1 !important;
+  }
+  .mbc-subtitle-text {
+    color: rgba(255,255,255,0.55) !important;
+    font-size: 0.74rem !important;
+    font-weight: 400 !important;
+    line-height: 1 !important;
+    margin: 0 !important;
+    display: block !important;
+  }
+
+  /* ── ⋯ popover trigger button: ghost on gradient ── */
+  [data-testid="stPopover"] > button {
+    background: rgba(255,255,255,0.15) !important;
+    border: 1px solid rgba(255,255,255,0.32) !important;
+    color: #ffffff !important;
+    border-radius: 7px !important;
+    font-size: 1rem !important;
+    padding: 5px 13px !important;
+    min-height: unset !important;
+    line-height: 1 !important;
+  }
+  [data-testid="stPopover"] > button:hover {
+    background: rgba(255,255,255,0.26) !important;
+  }
+
+  /* ── Popover dropdown panel ── */
+  [data-testid="stPopoverBody"] {
+    padding: 6px 0 10px !important;
+    min-width: 195px !important;
+  }
+  /* Section label rows */
+  [data-testid="stPopoverBody"] [data-testid="stMarkdownContainer"] p {
+    font-size: 0.67rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.09em !important;
+    text-transform: uppercase !important;
+    color: #9295a8 !important;
+    padding: 10px 14px 3px 14px !important;
+    margin: 0 !important;
+    line-height: 1 !important;
+  }
+  /* Action buttons */
+  [data-testid="stPopoverBody"] [data-testid="stButton"] > button {
+    all: unset !important;
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+    padding: 9px 14px !important;
+    font-size: 0.88rem !important;
+    font-weight: 500 !important;
+    color: #1a1d2e !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+    border-radius: 0 !important;
+    line-height: 1.2 !important;
+  }
+  [data-testid="stPopoverBody"] [data-testid="stButton"] > button:hover {
+    background: #f2f3f7 !important;
+    color: #1a7f6e !important;
+  }
+  /* Link button */
+  [data-testid="stPopoverBody"] [data-testid="stLinkButton"] a {
+    all: unset !important;
+    display: flex !important;
+    align-items: center !important;
+    width: 100% !important;
+    padding: 9px 14px !important;
+    font-size: 0.88rem !important;
+    font-weight: 500 !important;
+    color: #1a1d2e !important;
+    cursor: pointer !important;
+    box-sizing: border-box !important;
+  }
+  [data-testid="stPopoverBody"] [data-testid="stLinkButton"] a:hover {
+    background: #f2f3f7 !important;
+    color: #1a7f6e !important;
+  }
+  /* Divider */
+  [data-testid="stPopoverBody"] hr {
+    margin: 5px 0 !important;
+    border: none !important;
+    border-top: 1px solid #ecedf2 !important;
+  }
+  /* Caption */
+  [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] {
+    padding: 6px 14px 2px !important;
+    color: #9295a8 !important;
+    font-size: 0.76rem !important;
+    line-height: 1.55 !important;
+  }
+</style>
 """, unsafe_allow_html=True)
 
-# ── Menu (native Streamlit popover — React safe) ──────────────────────────────
-# Positioned using columns so it floats right without breaking layout
-_mc1, _mc2 = st.columns([6, 1])
-with _mc2:
-    with st.popover("⋯", use_container_width=False):
-        st.markdown("**Options**")
-        if st.button("🔄  Start over", use_container_width=True, help="Clear all uploads and reset"):
-            for key in list(st.session_state.keys()):
-                del st.session_state[key]
+_h1, _h2 = st.columns([11, 1])
+with _h1:
+    st.markdown('<p class="mbc-title-text">📋 Medical Booklet Creator</p><span class="mbc-subtitle-text">Created by Thomas van Sant</span>', unsafe_allow_html=True)
+with _h2:
+    with st.popover("•••"):
+        st.markdown("Actions")
+        if st.button("↩  Start Over", use_container_width=True):
+            for k in list(st.session_state.keys()):
+                del st.session_state[k]
+            st.rerun()
+        if st.button("⏹  Close the App", use_container_width=True):
+            st.session_state._show_close = not st.session_state.get("_show_close", False)
             st.rerun()
         st.divider()
-        st.markdown("**Help**")
-        st.link_button(
-            "↗  Open Seqta",
-            "https://teach.friends.tas.edu.au/studentSummary/reporting",
-            use_container_width=True
-        )
-        st.info("**To stop the app:** Go to the Terminal window and press **Ctrl + C**, then close Terminal.")
-        st.info("**To open without Terminal:** Double-click **Open Medical Booklet.command** in your medical-booklet folder, or drag it to your Dock.")
-        st.divider()
-        st.markdown("**About**")
-        st.caption("Medical Booklet Creator — built for Friends' School excursion and field activity planning. Created by Thomas van Sant.")
+        st.markdown("Info")
+        if st.button("❓  Help", use_container_width=True):
+            st.session_state._show_help = not st.session_state.get("_show_help", False)
+            st.rerun()
+        if st.button("ℹ  About", use_container_width=True):
+            st.session_state._show_about = not st.session_state.get("_show_about", False)
+            st.rerun()
+
+if st.session_state.get("_show_close"):
+    st.info("**To close the app:** Switch to the Terminal window that opened when you launched, press **Ctrl + C**, then close Terminal.", icon="⏹")
+
+if st.session_state.get("_show_help"):
+    with st.container(border=True):
+        st.markdown("**Quick help**")
+        st.markdown("""
+- **Launch the app:** Double-click **Open Medical Booklet.command** in your `Documents/medical-booklet` folder, or drag it to your Dock for one-click access.
+- **Stop the app:** Find the Terminal window and press **Ctrl + C**.
+- **Seqta data:** Both required files (Student List CSV and Photos PDF) come from [Seqta Reporting](https://teach.friends.tas.edu.au/studentSummary/reporting).
+- **Start fresh:** Use **Start Over** in this menu to clear all uploads and begin again.
+        """)
+        if st.button("✕  Close help"):
+            st.session_state._show_help = False
+            st.rerun()
+
+if st.session_state.get("_show_about"):
+    with st.container(border=True):
+        st.markdown("**📋 Medical Booklet Creator**")
+        st.markdown("Generates student profile PDFs for excursion and field activity planning — including medical information, emergency contacts, learning support needs, swimming ability and dietary requirements.")
+        st.caption("Created by Thomas van Sant · Friends' School")
+        if st.button("✕  Close"):
+            st.session_state._show_about = False
+            st.rerun()
+
 
 SEQTA_URL = "https://teach.friends.tas.edu.au/studentSummary/reporting"
 
