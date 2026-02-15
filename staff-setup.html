@@ -274,7 +274,24 @@
           <pre>bash ~/Documents/medical-booklet/run.sh</pre>
           <button class="copy-btn" onclick="copyCode(this, 'bash ~/Documents/medical-booklet/run.sh')">Copy</button>
         </div>
-        <div class="tip"><span class="tip-icon">✅</span> The app opens in your browser. Setup is done — next time just double-click to launch.</div>
+        <div class="tip"><span class="tip-icon">✅</span> The app opens in your browser. Setup is done — from now on just double-click <strong>Open Medical Booklet.command</strong> to launch.</div>
+      </div>
+    </div>
+
+    <!-- Step 4 -->
+    <div class="step">
+      <div class="step-number">4</div>
+      <div class="step-body">
+        <div class="step-title">Add a shortcut to your Dock</div>
+        <div class="step-desc">Setup has created a file called <strong>Open Medical Booklet.command</strong> in your medical-booklet folder. Double-clicking it opens the app — no Terminal typing needed.</div>
+        <div class="launch-hint">
+          <div class="launch-icon">📁</div>
+          <div>
+            <div class="launch-text-main">Documents → medical-booklet → Open Medical Booklet.command</div>
+            <div class="launch-text-sub">Double-click to launch. Drag it to your Dock for one-click access.</div>
+          </div>
+        </div>
+        <div class="tip"><span class="tip-icon">💡</span> To add it to your Dock: drag <strong>Open Medical Booklet.command</strong> from Finder into the right side of your Dock (near the Bin). It will stay there permanently.</div>
       </div>
     </div>
 
@@ -285,20 +302,33 @@
   <p class="section-label">Using the app day-to-day</p>
 
   <div class="use-card">
-    <h3>Starting the app</h3>
-    <p>Open Finder, go to <strong>Documents → medical-booklet</strong>, and double-click <strong>run.sh</strong>.</p>
+    <h3>Starting the app — double-click</h3>
+    <p>Open Finder, go to <strong>Documents → medical-booklet</strong>, and double-click <strong>Open Medical Booklet.command</strong>. Terminal opens briefly, then the app appears in your browser.</p>
     <div class="launch-hint">
-      <div class="launch-icon">📁</div>
+      <div class="launch-icon">🖱️</div>
       <div>
-        <div class="launch-text-main">Documents → medical-booklet → run.sh</div>
-        <div class="launch-text-sub">Double-click it. If asked how to open it, choose <strong>Terminal</strong>.</div>
+        <div class="launch-text-main">Documents → medical-booklet → Open Medical Booklet.command</div>
+        <div class="launch-text-sub">Double-click it. A Terminal window opens, then your browser launches the app automatically.</div>
       </div>
     </div>
+    <p style="margin-top:12px; font-size:13px; color:#6b6f82;">If macOS says it can't open the file, right-click it and choose <strong>Open</strong> instead — you'll only need to do this once.</p>
+  </div>
+
+  <div class="use-card">
+    <h3>Add a shortcut to your Dock <span style="font-size:12px;font-weight:400;color:#9295a8;margin-left:6px;">optional but handy</span></h3>
+    <p>You can pin the app launcher to your Dock so it's always one click away:</p>
+    <ol style="color:#4a4a6a;font-size:14px;font-weight:300;padding-left:20px;line-height:2.1;margin-top:6px;">
+      <li>Open Finder → <strong>Documents → medical-booklet</strong></li>
+      <li>Hold <strong>⌘ Command</strong> and drag <strong>Open Medical Booklet.command</strong> to the right side of your Dock — past the dividing line, near the Bin</li>
+      <li>Release. The icon appears in the Dock</li>
+      <li>Click it any time to launch the app</li>
+    </ol>
+    <div class="tip"><span class="tip-icon">💡</span> The Dock icon will look like a plain document. You can rename it by right-clicking → <strong>Options → Show in Finder</strong>, then renaming the file to <code>Open Medical Booklet.command</code> — the Dock updates automatically.</div>
   </div>
 
   <div class="use-card">
     <h3>Stopping the app</h3>
-    <p>Press <strong>Ctrl+C</strong> in the Terminal window that opened, then close Terminal.</p>
+    <p>Press <strong>Ctrl+C</strong> in the Terminal window, then close Terminal. The app stops immediately.</p>
   </div>
 
   <div class="use-card">
@@ -318,9 +348,16 @@
   </details>
 
   <details>
+    <summary>"Cannot open Open Medical Booklet.command" security warning</summary>
+    <div class="details-body">
+      macOS sometimes blocks files downloaded from the internet. Right-click <strong>Open Medical Booklet.command</strong> and choose <strong>Open</strong> — you'll see a prompt asking if you're sure. Click <strong>Open</strong>. After this once, double-clicking works normally.
+    </div>
+  </details>
+
+  <details>
     <summary>The app opens but shows "config.yaml not found"</summary>
     <div class="details-body">
-      Use the double-click method (Finder → Documents → medical-booklet → run.sh), or the exact Terminal command in Step 3 above which includes the full path.
+      Use the double-click method (Finder → Documents → medical-booklet → Open Medical Booklet.command), or the Terminal command from Step 3 above, which includes the full path.
     </div>
   </details>
 

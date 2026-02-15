@@ -1,12 +1,12 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
 #  Medical Booklet Creator — Launcher
-#  Double-click this file, or run: bash run.sh
+#  Double-click this file in Finder to launch the app
 # ─────────────────────────────────────────────
 
 # If double-clicked in Finder, relaunch inside a visible Terminal window
 if [ -z "$TERM" ] && [ "$(uname)" = "Darwin" ]; then
-    SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/$(basename "$0")"
+    SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/run.command"
     open -a Terminal "$SCRIPT_PATH"
     exit 0
 fi

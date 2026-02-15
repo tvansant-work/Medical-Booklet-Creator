@@ -136,7 +136,7 @@ HOOKEOF
         echo "   ⚠️  Could not determine env lib path — writing fallback."
     fi
 
-    # Also write the lib path to a local file so run.sh can set it directly
+    # Also write the lib path to a local file so run.command can set it directly
     # (conda run doesn't always execute activation hooks)
     conda run -n medical-booklet python -c \
         "import sys, os; print(os.path.normpath(os.path.join(sys.prefix, 'lib')))" \
@@ -180,10 +180,28 @@ else
 fi
 
 echo ""
+# ── Create double-clickable launcher ─────────
+echo "▶  Creating launcher shortcut..."
+
+LAUNCHER="$(pwd)/Open Medical Booklet.command"
+cat > "$LAUNCHER" << 'LAUNCHEOF'
+#!/bin/bash
+# Medical Booklet Creator — double-click launcher
+cd "$(dirname "$0")"
+bash run.sh
+LAUNCHEOF
+
+chmod +x "$LAUNCHER"
+echo "   ✅ Launcher created: 'Open Medical Booklet.command'"
+echo ""
+
 echo "══════════════════════════════════════════════"
 echo "   ✅  Setup complete!"
 echo ""
-echo "   To start the app, run:"
-echo "       bash run.sh"
+echo "   ▶  How to open the app:"
+echo "      Double-click 'Open Medical Booklet.command'"
+echo "      in your medical-booklet folder"
+echo ""
+echo "   Or from Terminal: bash run.sh"
 echo "══════════════════════════════════════════════"
 echo ""

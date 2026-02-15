@@ -72,7 +72,9 @@ st.set_page_config(
     layout="wide",
     page_icon="📋",
     menu_items={
-        "About": "**Medical Booklet Creator**\n\nBuilt for Friends' School excursion and field activity planning.\n\nCreated by Thomas van Sant. Contact via email for support."
+        "Get help": None,
+        "Report a bug": None,
+        "About": None
     }
 )
 
@@ -1338,6 +1340,12 @@ def image_to_a4_pdf(upload):
 # ── Custom CSS ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
+  /* ── Hide Streamlit top toolbar completely ── */
+  [data-testid="stToolbar"],
+  [data-testid="stDecoration"],
+  #MainMenu,
+  header { display: none !important; visibility: hidden !important; }
+
   /* ── Global background ── */
   [data-testid="stAppViewContainer"] { background: #f5f6fa; }
   [data-testid="stSidebar"] { display: none; }
@@ -1354,7 +1362,7 @@ st.markdown("""
     margin: 0 auto;
     padding: 0 28px;
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
   }
   .mbc-title {
@@ -1369,6 +1377,110 @@ st.markdown("""
     color: rgba(255,255,255,0.6);
     margin: 0;
     font-weight: 400;
+  }
+
+  /* ── Custom floating menu button ── */
+  .mbc-menu-wrap {
+    position: relative;
+    display: inline-block;
+  }
+  .mbc-menu-btn {
+    background: rgba(255,255,255,0.18);
+    border: 1px solid rgba(255,255,255,0.3);
+    border-radius: 8px;
+    color: #ffffff;
+    cursor: pointer;
+    font-size: 1.15rem;
+    padding: 5px 10px;
+    line-height: 1;
+    transition: background 0.15s;
+    font-family: inherit;
+  }
+  .mbc-menu-btn:hover { background: rgba(255,255,255,0.28); }
+
+  .mbc-dropdown {
+    display: none;
+    position: absolute;
+    right: 0;
+    top: calc(100% + 6px);
+    background: #ffffff;
+    border: 1px solid #e2e5ee;
+    border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+    min-width: 220px;
+    z-index: 9999;
+    overflow: hidden;
+  }
+  .mbc-dropdown.open { display: block; }
+
+  .mbc-menu-header {
+    padding: 10px 14px 8px;
+    font-size: 0.68rem;
+    font-weight: 650;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #9295a8;
+    border-bottom: 1px solid #f0f1f6;
+  }
+  .mbc-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    font-size: 0.85rem;
+    color: #1a1d2e;
+    cursor: pointer;
+    transition: background 0.1s;
+    border: none;
+    background: none;
+    width: 100%;
+    text-align: left;
+    font-family: inherit;
+    text-decoration: none;
+  }
+  .mbc-menu-item:hover { background: #f5f6fa; }
+  .mbc-menu-item .mi-icon { font-size: 1rem; flex-shrink: 0; }
+  .mbc-menu-item .mi-label { flex: 1; font-weight: 500; }
+  .mbc-menu-item .mi-desc { font-size: 0.73rem; color: #9295a8; display: block; }
+  .mbc-menu-divider { border: none; border-top: 1px solid #f0f1f6; margin: 4px 0; }
+
+  /* About panel */
+  .mbc-about {
+    display: none;
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: #fff;
+    border: 1px solid #e2e5ee;
+    border-radius: 14px;
+    box-shadow: 0 16px 48px rgba(0,0,0,0.18);
+    padding: 28px 32px;
+    z-index: 10000;
+    max-width: 400px;
+    width: 90%;
+  }
+  .mbc-about.open { display: block; }
+  .mbc-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.3);
+    z-index: 9998;
+  }
+  .mbc-overlay.open { display: block; }
+  .mbc-about-title {
+    font-size: 1rem; font-weight: 650; color: #1a1d2e;
+    margin-bottom: 10px;
+  }
+  .mbc-about-body {
+    font-size: 0.85rem; color: #4a4d62; line-height: 1.6;
+    margin-bottom: 18px;
+  }
+  .mbc-about-close {
+    background: #1a7f6e; color: #fff; border: none;
+    border-radius: 7px; padding: 8px 18px;
+    font-size: 0.85rem; font-weight: 600;
+    cursor: pointer; font-family: inherit;
   }
 
   /* ── Tab styling ── */
@@ -1404,7 +1516,7 @@ st.markdown("""
     border-bottom: 2px solid #d0ede9;
   }
 
-  /* ── Upload cards — required (teal left border) ── */
+  /* ── Upload cards ── */
   .upload-card {
     background: #ffffff;
     border: 1px solid #e2e5ee;
@@ -1413,129 +1525,159 @@ st.markdown("""
     padding: 16px 18px;
     margin-bottom: 10px;
   }
-  /* optional cards — softer amber border */
-  .upload-card.optional {
-    border-left-color: #e8960a;
-  }
-  .upload-card-label {
-    font-size: 0.82rem;
-    font-weight: 600;
-    color: #1a1d2e;
-    margin-bottom: 4px;
-  }
-  .upload-card-desc {
-    font-size: 0.76rem;
-    color: #9295a8;
-    margin-bottom: 10px;
-  }
+  .upload-card.optional { border-left-color: #e8960a; }
+  .upload-card-label { font-size: 0.82rem; font-weight: 600; color: #1a1d2e; margin-bottom: 4px; }
+  .upload-card-desc { font-size: 0.76rem; color: #9295a8; margin-bottom: 10px; }
   .seqta-link {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 0.75rem;
-    font-weight: 500;
-    color: #1a7f6e;
-    text-decoration: none;
-    background: #e8f7f4;
-    border: 1px solid #a8ddd6;
-    border-radius: 5px;
-    padding: 3px 9px;
-    margin-bottom: 8px;
+    display: inline-flex; align-items: center; gap: 5px;
+    font-size: 0.75rem; font-weight: 500; color: #1a7f6e;
+    text-decoration: none; background: #e8f7f4;
+    border: 1px solid #a8ddd6; border-radius: 5px;
+    padding: 3px 9px; margin-bottom: 8px;
   }
   .seqta-link:hover { background: #d0ede9; }
 
-  /* ── Step badge ── */
+  /* ── Step / options badges ── */
   .step-badge {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px; height: 24px;
-    background: #1a7f6e;
-    color: white;
-    border-radius: 50%;
-    font-size: 0.75rem;
-    font-weight: 650;
-    margin-right: 8px;
-    flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 24px; height: 24px; background: #1a7f6e; color: white;
+    border-radius: 50%; font-size: 0.75rem; font-weight: 650;
+    margin-right: 8px; flex-shrink: 0;
   }
   .step-row { display: flex; align-items: center; margin-bottom: 6px; }
   .step-label { font-size: 0.95rem; font-weight: 600; color: #1a1d2e; }
-
-  /* ── Options card titles ── */
   .options-card {
-    background: #ffffff;
-    border: 1px solid #e2e5ee;
-    border-radius: 10px;
-    padding: 18px 20px;
-    margin-bottom: 12px;
+    background: #ffffff; border: 1px solid #e2e5ee;
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 12px;
   }
   .options-card-title {
-    font-size: 0.8rem;
-    font-weight: 650;
-    color: #1a7f6e;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    margin-bottom: 10px;
+    font-size: 0.8rem; font-weight: 650; color: #1a7f6e;
+    text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 10px;
   }
 
   /* ── Footer ── */
   .mbc-footer {
-    margin-top: 48px;
-    padding-top: 16px;
-    border-top: 1px solid #e2e5ee;
-    text-align: center;
-    font-size: 0.75rem;
-    color: #b0b3c4;
+    margin-top: 48px; padding-top: 16px;
+    border-top: 1px solid #e2e5ee; text-align: center;
+    font-size: 0.75rem; color: #b0b3c4;
   }
 
-  /* ── Streamlit element overrides ── */
+  /* ── Streamlit overrides ── */
   [data-testid="stFileUploader"] { background: #fafcfb; border-radius: 8px; }
   div[data-testid="stCheckbox"] label { font-size: 0.88rem !important; }
   div[data-testid="stSelectbox"] label { font-size: 0.88rem !important; }
-
-  /* Primary button — teal */
   .stButton > button[kind="primary"] {
     background: linear-gradient(135deg, #1a7f6e, #2563a8) !important;
-    border: none !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
-    padding: 10px 28px !important;
-    font-size: 0.9rem !important;
-    color: #ffffff !important;
+    border: none !important; border-radius: 8px !important;
+    font-weight: 600 !important; padding: 10px 28px !important;
+    font-size: 0.9rem !important; color: #ffffff !important;
   }
-  .stButton > button[kind="primary"]:hover {
-    opacity: 0.92 !important;
-  }
-  .stButton > button:not([kind="primary"]) {
-    border-radius: 7px !important;
-    font-size: 0.86rem !important;
-  }
+  .stButton > button[kind="primary"]:hover { opacity: 0.92 !important; }
+  .stButton > button:not([kind="primary"]) { border-radius: 7px !important; font-size: 0.86rem !important; }
   [data-testid="stTextInput"] input {
-    border-radius: 8px !important;
-    font-size: 0.9rem !important;
-    border-color: #d0ede9 !important;
+    border-radius: 8px !important; font-size: 0.9rem !important; border-color: #d0ede9 !important;
   }
   [data-testid="stTextInput"] input:focus {
-    border-color: #1a7f6e !important;
-    box-shadow: 0 0 0 2px rgba(26,127,110,0.15) !important;
+    border-color: #1a7f6e !important; box-shadow: 0 0 0 2px rgba(26,127,110,0.15) !important;
   }
   div.stAlert { border-radius: 8px !important; font-size: 0.85rem !important; }
-
-  /* Progress bar — teal */
   [data-testid="stProgress"] > div > div {
     background: linear-gradient(90deg, #1a7f6e, #2563a8) !important;
   }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Header ────────────────────────────────────────────────────────────────────
+# ── Header + custom menu ─────────────────────────────────────────────────────
 st.markdown("""
+<div class="mbc-overlay" id="mbcOverlay" onclick="closeAll()"></div>
+
+<div class="mbc-about" id="mbcAbout">
+  <div class="mbc-about-title">📋 Medical Booklet Creator</div>
+  <div class="mbc-about-body">
+    Built for Friends&#39; School excursion and field activity planning.<br><br>
+    Generates student profile PDFs containing medical information, emergency contacts,
+    learning support needs, swimming ability and dietary requirements.<br><br>
+    <strong>Created by Thomas van Sant.</strong><br>
+    Contact your IT coordinator or the app creator for support.
+  </div>
+  <button class="mbc-about-close" onclick="closeAll()">Close</button>
+</div>
+
 <div class="mbc-header">
   <div class="mbc-header-inner">
     <span class="mbc-title">📋 Medical Booklet Creator</span>
-    <span class="mbc-subtitle">Created by Thomas van Sant</span>
+    <div class="mbc-menu-wrap">
+      <button class="mbc-menu-btn" onclick="toggleMenu()" title="Menu">⋯</button>
+      <div class="mbc-dropdown" id="mbcDropdown">
+        <div class="mbc-menu-header">Options</div>
+
+        <button class="mbc-menu-item" onclick="reloadApp()">
+          <span class="mi-icon">🔄</span>
+          <span class="mi-label">Start over<span class="mi-desc">Clear all uploads and reset</span></span>
+        </button>
+
+        <hr class="mbc-menu-divider">
+        <div class="mbc-menu-header">Help</div>
+
+        <a class="mbc-menu-item" href="https://teach.friends.tas.edu.au/studentSummary/reporting" target="_blank" onclick="closeAll()">
+          <span class="mi-icon">↗</span>
+          <span class="mi-label">Open Seqta<span class="mi-desc">Student data &amp; reports</span></span>
+        </a>
+
+        <button class="mbc-menu-item" onclick="showKeyboard()">
+          <span class="mi-icon">⌨️</span>
+          <span class="mi-label">Keyboard shortcut<span class="mi-desc">Open app without Terminal</span></span>
+        </button>
+
+        <button class="mbc-menu-item" onclick="showStopHelp()">
+          <span class="mi-icon">⏹</span>
+          <span class="mi-label">How to stop the app<span class="mi-desc">Close the app when finished</span></span>
+        </button>
+
+        <hr class="mbc-menu-divider">
+
+        <button class="mbc-menu-item" onclick="showAbout()">
+          <span class="mi-icon">ℹ️</span>
+          <span class="mi-label">About<span class="mi-desc">Medical Booklet Creator</span></span>
+        </button>
+      </div>
+    </div>
   </div>
 </div>
+
+<script>
+function toggleMenu() {
+  document.getElementById('mbcDropdown').classList.toggle('open');
+}
+function closeAll() {
+  document.getElementById('mbcDropdown').classList.remove('open');
+  document.getElementById('mbcAbout').classList.remove('open');
+  document.getElementById('mbcOverlay').classList.remove('open');
+}
+function showAbout() {
+  closeAll();
+  document.getElementById('mbcAbout').classList.add('open');
+  document.getElementById('mbcOverlay').classList.add('open');
+}
+function reloadApp() {
+  closeAll();
+  window.location.reload();
+}
+function showKeyboard() {
+  closeAll();
+  alert('To open the app quickly:\n\n1. Open Finder\n2. Go to Documents → medical-booklet\n3. Double-click  Open Medical Booklet.command\n\nThe app will open in your browser automatically.');
+}
+function showStopHelp() {
+  closeAll();
+  alert('To stop the app:\n\n1. Find the Terminal window that opened when you launched\n2. Press  Ctrl + C\n3. You can then close Terminal\n\nThe app will stop and localhost:8501 will no longer work.');
+}
+document.addEventListener('click', function(e) {
+  var wrap = document.querySelector('.mbc-menu-wrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('mbcDropdown').classList.remove('open');
+  }
+});
+</script>
 """, unsafe_allow_html=True)
 
 SEQTA_URL = "https://teach.friends.tas.edu.au/studentSummary/reporting"
