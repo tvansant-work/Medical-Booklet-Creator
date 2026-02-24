@@ -14,47 +14,11 @@ fi
 cd "$(dirname "$0")"
 
 # ── Set library path for WeasyPrint (conda path) ─────────────────
-# conda run doesn't reliably execute activation hooks, so we set
-# DYLD_LIBRARY_PATH directly from the path recorded during setup.
 if [ -f ".conda-lib-path" ]; then
     ENV_LIB_PATH="$(cat .conda-lib-path)"
     if [ -n "$ENV_LIB_PATH" ] && [ -d "$ENV_LIB_PATH" ]; then
         export DYLD_LIBRARY_PATH="${ENV_LIB_PATH}:${DYLD_LIBRARY_PATH}"
         export DYLD_FALLBACK_LIBRARY_PATH="${ENV_LIB_PATH}:${DYLD_FALLBACK_LIBRARY_PATH}"
-    fi
-fi
-
-# ── Auto-update from GitHub ───────────────────────────────────────
-if command -v git &>/dev/null && [ -d ".git" ]; then
-    echo ""
-    echo "  🔄  Checking for updates..."
-
-    git fetch --quiet origin 2>/dev/null &
-    FETCH_PID=$!
-    sleep 5
-    if kill -0 $FETCH_PID 2>/dev/null; then
-        kill $FETCH_PID 2>/dev/null
-        echo "  ⚠️   No internet — running current version."
-    else
-        wait $FETCH_PID
-        LOCAL=$(git rev-parse HEAD 2>/dev/null)
-        REMOTE=$(git rev-parse origin/main 2>/dev/null || git rev-parse origin/master 2>/dev/null)
-
-        if [ -n "$REMOTE" ] && [ "$LOCAL" != "$REMOTE" ]; then
-            echo "  📦  Update found — downloading..."
-            git pull --quiet --ff-only origin main 2>/dev/null \
-                || git pull --quiet --ff-only origin master 2>/dev/null \
-                || echo "  ⚠️   Update skipped (local changes detected)."
-
-            if [ -f ".venv/bin/pip" ]; then
-                .venv/bin/pip install -r requirements.txt -q 2>/dev/null
-            elif [ -f ".conda-env-name" ] && command -v conda &>/dev/null; then
-                conda run -n "$(cat .conda-env-name)" pip install -r requirements.txt -q 2>/dev/null
-            fi
-            echo "  ✅  Updated."
-        else
-            echo "  ✅  Already up to date."
-        fi
     fi
 fi
 
@@ -96,8 +60,17 @@ if [ -z "$PYTHON" ] || ! $PYTHON -c "import streamlit" &>/dev/null 2>&1; then
     exit 1
 fi
 
+# ── Verify / Update Dependencies ──────────────────────────────────
+# Silently installs any new packages added to requirements.txt
+echo "  📦  Checking dependencies..."
+if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
+    conda run -n "$ENV_NAME" pip install -r requirements.txt -q 2>/dev/null
+else
+    $PYTHON -m pip install -r requirements.txt -q 2>/dev/null
+fi
+
 # ── Bypass Streamlit Welcome Prompt ───────────────────────────────
-# This prevents Streamlit from hanging/crashing when asking for an email address
+# Prevents Streamlit from hanging/crashing when asking for an email
 mkdir -p ~/.streamlit
 if [ ! -f ~/.streamlit/credentials.toml ]; then
     echo "[general]" > ~/.streamlit/credentials.toml

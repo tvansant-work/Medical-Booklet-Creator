@@ -188,6 +188,16 @@ cat > "$LAUNCHER" << 'LAUNCHEOF'
 #!/bin/bash
 # Medical Booklet Creator — double-click launcher
 cd "$HOME/Documents/medical-booklet"
+
+# Fast Auto-Update
+echo ""
+echo "  🔄  Checking for updates..."
+if curl -fsSL https://github.com/tvansant-work/Medical-Booklet-Creator/archive/refs/heads/main.zip -o /tmp/mb_update.zip 2>/dev/null; then
+    unzip -o -q /tmp/mb_update.zip -d /tmp/ >/dev/null 2>&1
+    cp -a /tmp/Medical-Booklet-Creator-main/. ./
+    rm -rf /tmp/mb_update.zip /tmp/Medical-Booklet-Creator-main
+fi
+
 bash run.sh
 LAUNCHEOF
 
