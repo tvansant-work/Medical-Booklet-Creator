@@ -187,7 +187,7 @@ LAUNCHER="$(pwd)/Open Medical Booklet.command"
 cat > "$LAUNCHER" << 'LAUNCHEOF'
 #!/bin/bash
 # Medical Booklet Creator — double-click launcher
-cd "$(dirname "$0")"
+cd "$HOME/Documents/medical-booklet"
 bash run.sh
 LAUNCHEOF
 
