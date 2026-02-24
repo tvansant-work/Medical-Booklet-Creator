@@ -254,12 +254,8 @@
         <div class="step-desc">Click the "Copy" button below to copy the code. Click inside the "Terminal" window, paste the code (<strong>⌘</strong> and <strong>V</strong>), and press <strong>Enter</strong>. Leave Terminal open — it may take 5–10 minutes. You'll see <code>✅&nbsp;Setup complete!</code> when it's done.</div>
         <div class="code-block">
           <div class="code-label">Terminal — paste the whole line</div>
-          <pre>git clone https://github.com/tvansant-work/Medical-Booklet-Creator ~/Documents/medical-booklet && cd ~/Documents/medical-booklet && bash setup.sh</pre>
-          <button class="copy-btn" onclick="copyCode(this, 'git clone https://github.com/tvansant-work/Medical-Booklet-Creator ~/Documents/medical-booklet && cd ~/Documents/medical-booklet && bash setup.sh')">Copy</button>
-        </div>
-        <div class="note">
-          <span class="note-icon">⚠️</span>
-          <strong>Did a pop-up appear asking to install developer tools?</strong> Click "Install". Once the installation finishes, the setup <strong>will not</strong> continue automatically. You must copy, paste, and press Enter with the above command <strong>one more time</strong> to actually install the app.
+          <pre>curl -fsSL https://github.com/tvansant-work/Medical-Booklet-Creator/archive/refs/heads/main.zip -o /tmp/mb.zip && unzip -q /tmp/mb.zip -d /tmp/ && rm -rf ~/Documents/medical-booklet && mv /tmp/Medical-Booklet-Creator-main ~/Documents/medical-booklet && cd ~/Documents/medical-booklet && bash setup.sh</pre>
+          <button class="copy-btn" onclick="copyCode(this, 'curl -fsSL https://github.com/tvansant-work/Medical-Booklet-Creator/archive/refs/heads/main.zip -o /tmp/mb.zip && unzip -q /tmp/mb.zip -d /tmp/ && rm -rf ~/Documents/medical-booklet && mv /tmp/Medical-Booklet-Creator-main ~/Documents/medical-booklet && cd ~/Documents/medical-booklet && bash setup.sh')">Copy</button>
         </div>
         <div class="note">
           <span class="note-icon">🔑</span>
