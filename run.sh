@@ -96,6 +96,14 @@ if [ -z "$PYTHON" ] || ! $PYTHON -c "import streamlit" &>/dev/null 2>&1; then
     exit 1
 fi
 
+# ── Bypass Streamlit Welcome Prompt ───────────────────────────────
+# This prevents Streamlit from hanging/crashing when asking for an email address
+mkdir -p ~/.streamlit
+if [ ! -f ~/.streamlit/credentials.toml ]; then
+    echo "[general]" > ~/.streamlit/credentials.toml
+    echo 'email = ""' >> ~/.streamlit/credentials.toml
+fi
+
 # ── Launch ────────────────────────────────────────────────────────
 echo ""
 echo "  ✅  Starting Medical Booklet Creator..."
