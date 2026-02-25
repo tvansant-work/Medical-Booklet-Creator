@@ -1624,6 +1624,16 @@ if "project_title" not in st.session_state: st.session_state.project_title = ""
 
 t1, t2 = st.tabs(["  Setup  ", "  Process & Generate  "])
 
+# Auto-switch to tab 2 if the button was clicked
+if st.session_state.get("_active_tab") == 1:
+    st.session_state._active_tab = None
+    st.components.v1.html("""
+    <script>
+        // Click the second tab (Process & Generate)
+        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[1].click();
+    </script>
+    """, height=0)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — SETUP
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1739,6 +1749,18 @@ with t1:
         with open(path, "wb") as f: f.write(photos.getbuffer())
         st.session_state.photo_pdf = path
         st.success("✅ Photos loaded")
+
+    # ── Navigate to Process & Generate ───────────────────────────────────────
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.divider()
+    ready = "df_final" in st.session_state and "photo_pdf" in st.session_state
+    if ready:
+        if st.button("\u25b6\u2002 Process & Generate \u2192", type="primary", use_container_width=True):
+            st.session_state._active_tab = 1
+            st.rerun()
+    else:
+        st.button("\u25b6\u2002 Process & Generate \u2192", type="primary", use_container_width=True, disabled=True)
+        st.caption("Upload the required files above to continue.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — PROCESS & GENERATE
