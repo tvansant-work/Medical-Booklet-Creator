@@ -54,6 +54,7 @@ import urllib.parse
 import re
 import base64
 import pdfplumber
+import requests
 from io import BytesIO
 from PIL import Image
 from datetime import datetime
@@ -173,6 +174,82 @@ def convert_file_to_images(file_obj):
         print(f"Error converting file {file_obj.name}: {e}")
         
     return images_b64
+
+def auto_download_plan(url, session_cookie, cookie_name="ASP.NET_SessionId"):
+    """
+    Attempts to download a medical action plan file from a URL using a session cookie.
+    Returns: (BytesIO file object, filename, error_message)
+    - On success: (BytesIO, "filename.pdf", None)
+    - On failure: (None, None, "error description")
+    """
+    try:
+        # Build cookie jar from the pasted value
+        cookies = {cookie_name: session_cookie.strip()}
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+            "Accept": "application/pdf,application/octet-stream,image/*,*/*"
+        }
+
+        resp = requests.get(url, cookies=cookies, headers=headers, timeout=15, allow_redirects=True)
+
+        # Check for redirect to login page (cookie expired / invalid)
+        if resp.status_code == 302 or "login" in resp.url.lower():
+            return None, None, "Redirected to login — session cookie may have expired."
+
+        if resp.status_code != 200:
+            return None, None, f"Server returned status {resp.status_code}."
+
+        content_type = resp.headers.get("Content-Type", "").lower()
+
+        # Detect if we got an HTML page instead of a file (cookie invalid or viewer URL)
+        if "text/html" in content_type:
+            if "login" in resp.text.lower() or "sign in" in resp.text.lower():
+                return None, None, "Session cookie invalid or expired — received login page."
+            return None, None, "URL opened a web page, not a file. This link may need to be opened in a browser and downloaded manually."
+
+        # Determine file extension from content type
+        ext_map = {
+            "application/pdf": ".pdf",
+            "image/jpeg": ".jpg",
+            "image/jpg": ".jpg",
+            "image/png": ".png",
+            "image/gif": ".gif",
+            "application/octet-stream": ".pdf",  # assume PDF for generic binary
+        }
+        ext = ".pdf"  # safe default
+        for mime, file_ext in ext_map.items():
+            if mime in content_type:
+                ext = file_ext
+                break
+
+        # Try to get filename from Content-Disposition header
+        filename = None
+        cd = resp.headers.get("Content-Disposition", "")
+        if cd:
+            fname_match = re.search(r'filename[^;=\n]*=(["\'])?(.*?)\1', cd)
+            if fname_match:
+                filename = fname_match.group(2).strip()
+
+        if not filename:
+            # Derive from URL
+            url_path = url.split("?")[0].rstrip("/")
+            filename = url_path.split("/")[-1] or f"action_plan{ext}"
+            if "." not in filename:
+                filename += ext
+
+        file_bytes = BytesIO(resp.content)
+        file_bytes.name = filename  # attach name so convert_file_to_images works
+        file_bytes.seek(0)
+        return file_bytes, filename, None
+
+    except requests.exceptions.Timeout:
+        return None, None, "Request timed out — check your network connection."
+    except requests.exceptions.ConnectionError:
+        return None, None, "Could not connect to the server."
+    except Exception as e:
+        return None, None, f"Unexpected error: {e}"
+
 
 def detect_medical_plans(df):
     """
@@ -1621,6 +1698,7 @@ SEQTA_URL = "https://teach.friends.tas.edu.au/studentSummary/reporting"
 
 if "attachments" not in st.session_state: st.session_state.attachments = {}
 if "project_title" not in st.session_state: st.session_state.project_title = ""
+if "auto_downloaded_plans" not in st.session_state: st.session_state.auto_downloaded_plans = {}
 
 t1, t2 = st.tabs(["  Setup  ", "  Process & Generate  "])
 
@@ -1886,6 +1964,118 @@ with t2:
         st.markdown('<div class="section-head">Step 3 — Medical action plans</div>', unsafe_allow_html=True)
 
         detected = st.session_state.get('detected_plans', {})
+
+        # ── Advanced Options (session cookie + auto-download) ─────────────────
+        if detected:
+            with st.expander("⚙️ Advanced Options — Auto-download plans"):
+                st.markdown("**Auto-download all plans using your portal session**")
+                st.caption(
+                    "This uses your existing browser login to download action plans automatically. "
+                    "Your credentials are never stored — only the temporary session value is used."
+                )
+
+                # Cookie name hint (Synweb/Seqta typically uses one of these)
+                PORTAL_HOST = CONFIG['app_settings'].get('school_portal_url', '')
+                portal_domain = PORTAL_HOST.replace("https://", "").replace("http://", "").split("/")[0]
+
+                st.markdown("**How to get your session cookie:**")
+                st.markdown(f"""
+1. Log into [{portal_domain}]({PORTAL_HOST}) in Chrome or Safari as normal
+2. Press **F12** to open DevTools (or right-click anywhere → **Inspect**)
+3. Click the **Application** tab (Chrome) or **Storage** tab (Safari)
+4. In the left panel: **Cookies** → click `{portal_domain}`
+5. Find the cookie named **`ASP.NET_SessionId`** (or `SEQTASESSION`)
+6. Click it and copy the **Value** column
+7. Paste it below
+""")
+                st.info("💡 The cookie expires when you log out of the portal. If auto-download fails, log back in and copy a fresh value.", icon="ℹ️")
+
+                col_cookie, col_name = st.columns([3, 1])
+                with col_cookie:
+                    cookie_val = st.text_input(
+                        "Session cookie value",
+                        value=st.session_state.get("_portal_cookie", ""),
+                        type="password",
+                        placeholder="Paste cookie value here…",
+                        key="portal_cookie_input"
+                    )
+                with col_name:
+                    cookie_name = st.text_input(
+                        "Cookie name",
+                        value=st.session_state.get("_portal_cookie_name", "ASP.NET_SessionId"),
+                        placeholder="ASP.NET_SessionId",
+                        key="portal_cookie_name_input"
+                    )
+
+                if cookie_val:
+                    st.session_state["_portal_cookie"] = cookie_val
+                if cookie_name:
+                    st.session_state["_portal_cookie_name"] = cookie_name
+
+                n_plans_total = sum(len(plans) for plans in detected.values())
+                btn_label = f"⬇ Auto-download all {n_plans_total} plan{'s' if n_plans_total != 1 else ''}"
+
+                if not cookie_val:
+                    st.button(btn_label, disabled=True, help="Paste your session cookie above first")
+                else:
+                    if st.button(btn_label, type="primary"):
+                        if "auto_downloaded_plans" not in st.session_state:
+                            st.session_state.auto_downloaded_plans = {}
+
+                        download_results = []
+                        prog_bar = st.progress(0)
+                        total_plans = n_plans_total
+                        done = 0
+
+                        for sid, plans in detected.items():
+                            s_name = id_to_name_map.get(sid, sid)
+                            for p_idx, plan in enumerate(plans):
+                                url = plan.get('url')
+                                if not url:
+                                    download_results.append((s_name, plan['condition'], False, "No URL available"))
+                                    done += 1
+                                    prog_bar.progress(done / total_plans)
+                                    continue
+
+                                file_obj, filename, error = auto_download_plan(
+                                    url,
+                                    cookie_val,
+                                    cookie_name=cookie_name or "ASP.NET_SessionId"
+                                )
+
+                                if file_obj:
+                                    # Store in session state keyed the same way as manual uploads
+                                    key = f"plan_upload_{sid}_{p_idx}"
+                                    st.session_state[key] = file_obj
+                                    # Also track for display
+                                    plan_key = f"{sid}_{p_idx}"
+                                    st.session_state.auto_downloaded_plans[plan_key] = {
+                                        "filename": filename, "sid": sid, "condition": plan['condition']
+                                    }
+                                    download_results.append((s_name, plan['condition'], True, filename))
+                                else:
+                                    download_results.append((s_name, plan['condition'], False, error))
+
+                                done += 1
+                                prog_bar.progress(done / total_plans)
+
+                        prog_bar.empty()
+
+                        # Show results summary
+                        successes = [r for r in download_results if r[2]]
+                        failures  = [r for r in download_results if not r[2]]
+
+                        if successes:
+                            st.success(f"✅ Downloaded {len(successes)} of {total_plans} plans successfully")
+                        if failures:
+                            st.warning(f"⚠️ {len(failures)} plan{'s' if len(failures) != 1 else ''} could not be downloaded:")
+                            for s_name, condition, _, reason in failures:
+                                st.caption(f"• **{s_name}** — {condition}: {reason}")
+
+                        if successes:
+                            st.rerun()
+
+        # ── Per-student plan list ─────────────────────────────────────────────
         if detected:
             for sid, plans in detected.items():
                 s_name = id_to_name_map.get(sid, sid)
@@ -1895,9 +2085,20 @@ with t2:
                         col1, col2 = st.columns([3, 2])
                         with col1:
                             st.markdown(f"**{plan['condition']}**")
-                            if plan.get('url'): st.markdown(f"[↗ Open document]({plan['url']})")
+                            if plan.get('url'):
+                                st.markdown(f"[↗ Open document]({plan['url']})")
+                            # Show auto-download status if available
+                            plan_key = f"{sid}_{p_idx}"
+                            ad = st.session_state.get("auto_downloaded_plans", {}).get(plan_key)
+                            if ad:
+                                st.caption(f"✅ Auto-downloaded: {ad['filename']}")
                         with col2:
-                            st.file_uploader(f"Upload {plan['condition']}", type=['pdf','png','jpg'], key=f"plan_upload_{sid}_{p_idx}")
+                            # Pre-label the uploader to indicate auto-download status
+                            upload_label = f"Upload {plan['condition']}"
+                            existing_key = f"plan_upload_{sid}_{p_idx}"
+                            if st.session_state.get("auto_downloaded_plans", {}).get(plan_key):
+                                upload_label = f"Replace {plan['condition']} (auto-downloaded)"
+                            st.file_uploader(upload_label, type=['pdf','png','jpg'], key=existing_key)
                     st.divider()
         else:
             st.caption("No action plans detected in student data.")

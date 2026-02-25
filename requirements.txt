@@ -7,3 +7,4 @@ jinja2
 weasyprint
 pypdf
 watchdog
+requests
