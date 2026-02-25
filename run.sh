@@ -77,6 +77,17 @@ if [ ! -f ~/.streamlit/credentials.toml ]; then
     echo 'email = ""' >> ~/.streamlit/credentials.toml
 fi
 
+# ── Force light theme always (ignores OS/browser dark mode) ───────
+mkdir -p .streamlit
+cat > .streamlit/config.toml << 'TOMLEOF'
+[theme]
+base = "light"
+primaryColor = "#1a7f6e"
+backgroundColor = "#f5f6fa"
+secondaryBackgroundColor = "#ffffff"
+textColor = "#1a1d2e"
+TOMLEOF
+
 # ── Launch ────────────────────────────────────────────────────────
 echo ""
 echo "  ✅  Starting Medical Booklet Creator..."

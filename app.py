@@ -1882,7 +1882,7 @@ with t2:
 
         with st.expander("Add a plan manually"):
             st.caption("Select a student and upload a file. Add right before generating.")
-            man_sel = st.selectbox("Select student", sorted(list(name_to_id_map.keys()))[1:])
+            man_sel = st.selectbox("Select student", ["(Select a student)"] + sorted(list(name_to_id_map.keys())))
             st.file_uploader("Upload file", type=['pdf','png','jpg'], key="manual_plan_file")
 
         # ── Step 4: Content options ───────────────────────────────────────────
@@ -1951,7 +1951,7 @@ with t2:
                     for f in fl:
                         if f not in plan_map[sid]: plan_map[sid].append(f)
 
-            if st.session_state.get("manual_plan_file") and "man_sel" in locals() and man_sel:
+            if st.session_state.get("manual_plan_file") and "man_sel" in locals() and man_sel and man_sel != "(Select a student)":
                 msid = name_to_id_map[man_sel]
                 mf = st.session_state.get("manual_plan_file")
                 if msid not in plan_map: plan_map[msid] = []
