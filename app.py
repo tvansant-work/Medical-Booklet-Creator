@@ -1880,10 +1880,57 @@ with t2:
         else:
             st.caption("No action plans detected in student data.")
 
-        with st.expander("Add a plan manually"):
-            st.caption("Select a student and upload a file. Add right before generating.")
-            man_sel = st.selectbox("Select student", ["(Select a student)"] + sorted(list(name_to_id_map.keys())))
-            st.file_uploader("Upload file", type=['pdf','png','jpg'], key="manual_plan_file")
+        # Initialise the manual plans store
+        if "manual_plans_store" not in st.session_state:
+            st.session_state.manual_plans_store = []  # list of {'sid': ..., 'name': ..., 'file': ...}
+        if "_manual_plan_reset" not in st.session_state:
+            st.session_state._manual_plan_reset = 0
+
+        with st.expander("Add a plan manually", expanded=bool(st.session_state.manual_plans_store)):
+            st.caption("Select a student, upload a file, then click **Add Plan**. Repeat for each student.")
+
+            # Show already-added plans
+            if st.session_state.manual_plans_store:
+                st.markdown("**Plans queued:**")
+                to_remove = None
+                for i, entry in enumerate(st.session_state.manual_plans_store):
+                    c1, c2 = st.columns([6, 1])
+                    with c1:
+                        st.markdown(f"✅ **{entry['name']}** — {entry['file'].name}")
+                    with c2:
+                        if st.button("✕", key=f"remove_manual_plan_{i}", help="Remove this plan"):
+                            to_remove = i
+                if to_remove is not None:
+                    st.session_state.manual_plans_store.pop(to_remove)
+                    st.rerun()
+                st.divider()
+
+            # Use reset counter in key so widgets clear after Add Plan
+            reset_key = st.session_state._manual_plan_reset
+            man_sel = st.selectbox(
+                "Select student",
+                ["(Select a student)"] + sorted(list(name_to_id_map.keys())),
+                key=f"man_sel_{reset_key}"
+            )
+            man_file = st.file_uploader(
+                "Upload file",
+                type=['pdf', 'png', 'jpg'],
+                key=f"manual_plan_file_{reset_key}"
+            )
+
+            if st.button("Add Plan", key="add_manual_plan_btn", type="primary"):
+                if man_sel == "(Select a student)":
+                    st.warning("Please select a student first.")
+                elif man_file is None:
+                    st.warning("Please upload a file first.")
+                else:
+                    st.session_state.manual_plans_store.append({
+                        'sid': name_to_id_map[man_sel],
+                        'name': man_sel,
+                        'file': man_file
+                    })
+                    st.session_state._manual_plan_reset += 1
+                    st.rerun()
 
         # ── Step 4: Content options ───────────────────────────────────────────
         st.markdown('<div class="section-head">Step 4 — Content options</div>', unsafe_allow_html=True)
@@ -1951,9 +1998,9 @@ with t2:
                     for f in fl:
                         if f not in plan_map[sid]: plan_map[sid].append(f)
 
-            if st.session_state.get("manual_plan_file") and "man_sel" in locals() and man_sel and man_sel != "(Select a student)":
-                msid = name_to_id_map[man_sel]
-                mf = st.session_state.get("manual_plan_file")
+            for entry in st.session_state.get("manual_plans_store", []):
+                msid = entry['sid']
+                mf = entry['file']
                 if msid not in plan_map: plan_map[msid] = []
                 if mf not in plan_map[msid]: plan_map[msid].append(mf)
 
