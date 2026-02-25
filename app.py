@@ -2212,6 +2212,12 @@ with t2:
             detected = st.session_state.get('detected_plans', {})
             auto_files = st.session_state.get("auto_downloaded_plan_files", {})
 
+            print(f"\n{'='*60}")
+            print(f"PLAN MAP DEBUG")
+            print(f"detected_plans keys: {list(detected.keys())}")
+            print(f"auto_downloaded_plan_files keys: {list(auto_files.keys())}")
+            print(f"session_state keys with 'plan_upload': {[k for k in st.session_state.keys() if 'plan_upload' in k]}")
+
             if detected:
                 for sid, plans in detected.items():
                     for idx, _ in enumerate(plans):
@@ -2220,17 +2226,25 @@ with t2:
                         # 1. Manual file uploader takes priority (user-uploaded)
                         k = f"plan_upload_{sid}_{idx}"
                         f = st.session_state.get(k)
+                        print(f"  [{plan_key}] widget key '{k}' -> {type(f).__name__ if f else 'None'}")
                         if f:
+                            print(f"    manual upload: name={getattr(f,'name','?')}, size={getattr(f,'size','?')}")
                             if sid not in plan_map: plan_map[sid] = []
                             plan_map[sid].append(f)
 
                         # 2. Auto-downloaded: reconstruct fresh BytesIO from stored bytes
                         elif plan_key in auto_files:
                             raw_bytes, fname = auto_files[plan_key]
+                            print(f"    auto-download: fname={fname}, bytes={len(raw_bytes)}")
                             buf = BytesIO(raw_bytes)
                             buf.name = fname  # needed by convert_file_to_images
                             if sid not in plan_map: plan_map[sid] = []
                             plan_map[sid].append(buf)
+                        else:
+                            print(f"    NO FILE - neither manual nor auto-download found")
+
+            print(f"Final plan_map: { {k: len(v) for k,v in plan_map.items()} }")
+            print(f"{'='*60}\n")
 
             if "medical_plan_files" in st.session_state:
                 for sid, fl in st.session_state.medical_plan_files.items():
@@ -2337,9 +2351,14 @@ with t2:
 
                 embedded = []
                 if sid in plan_map:
-                    for f in plan_map[sid]: embedded.extend(convert_file_to_images(f))
+                    for f in plan_map[sid]:
+                        fname_debug = getattr(f, 'name', 'unknown')
+                        result = convert_file_to_images(f)
+                        print(f"  convert_file_to_images({fname_debug}) -> {len(result)} image(s)")
+                        embedded.extend(result)
                 if sid in st.session_state.attachments:
                     for f in st.session_state.attachments[sid]: embedded.extend(convert_file_to_images(f))
+                print(f"  Student {sid}: {len(embedded)} embedded image(s) total")
 
                 med_l = raw_med.lower()
                 c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phone']['display']})" if parsed_con else ""
