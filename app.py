@@ -2045,14 +2045,14 @@ with t2:
                                 )
 
                                 if file_obj:
-                                    # Store auto-downloaded files in a separate dict —
-                                    # Streamlit does NOT allow setting file_uploader widget
-                                    # state programmatically, so we keep our own store and
-                                    # merge it into plan_map at generation time.
+                                    # Store raw bytes + filename as a plain tuple so they
+                                    # survive st.rerun() serialisation. BytesIO objects are
+                                    # not reliably preserved across reruns in session_state.
                                     plan_key = f"{sid}_{p_idx}"
                                     if "auto_downloaded_plan_files" not in st.session_state:
                                         st.session_state.auto_downloaded_plan_files = {}
-                                    st.session_state.auto_downloaded_plan_files[plan_key] = file_obj
+                                    file_obj.seek(0)
+                                    st.session_state.auto_downloaded_plan_files[plan_key] = (file_obj.read(), filename)
                                     st.session_state.auto_downloaded_plans[plan_key] = {
                                         "filename": filename, "sid": sid, "condition": plan['condition']
                                     }
@@ -2207,37 +2207,42 @@ with t2:
 
         if st.button("Generate Medical Booklet", type="primary"):
 
-            # ── Gather plans (logic unchanged) ───────────────────────────────
+            # ── Gather plans ─────────────────────────────────────────────────
             plan_map = {}
             detected = st.session_state.get('detected_plans', {})
+            auto_files = st.session_state.get("auto_downloaded_plan_files", {})
+
             if detected:
                 for sid, plans in detected.items():
                     for idx, _ in enumerate(plans):
-                        # 1. Manual file uploader (user-uploaded)
+                        plan_key = f"{sid}_{idx}"
+
+                        # 1. Manual file uploader takes priority (user-uploaded)
                         k = f"plan_upload_{sid}_{idx}"
                         f = st.session_state.get(k)
                         if f:
                             if sid not in plan_map: plan_map[sid] = []
-                            if f not in plan_map[sid]: plan_map[sid].append(f)
-                        # 2. Auto-downloaded file (stored separately to avoid widget conflict)
-                        plan_key = f"{sid}_{idx}"
-                        af = st.session_state.get("auto_downloaded_plan_files", {}).get(plan_key)
-                        if af and not f:  # only use auto if no manual upload overrides it
+                            plan_map[sid].append(f)
+
+                        # 2. Auto-downloaded: reconstruct fresh BytesIO from stored bytes
+                        elif plan_key in auto_files:
+                            raw_bytes, fname = auto_files[plan_key]
+                            buf = BytesIO(raw_bytes)
+                            buf.name = fname  # needed by convert_file_to_images
                             if sid not in plan_map: plan_map[sid] = []
-                            af.seek(0)
-                            if af not in plan_map[sid]: plan_map[sid].append(af)
+                            plan_map[sid].append(buf)
 
             if "medical_plan_files" in st.session_state:
                 for sid, fl in st.session_state.medical_plan_files.items():
                     if sid not in plan_map: plan_map[sid] = []
                     for f in fl:
-                        if f not in plan_map[sid]: plan_map[sid].append(f)
+                        plan_map[sid].append(f)
 
             for entry in st.session_state.get("manual_plans_store", []):
                 msid = entry['sid']
                 mf = entry['file']
                 if msid not in plan_map: plan_map[msid] = []
-                if mf not in plan_map[msid]: plan_map[msid].append(mf)
+                plan_map[msid].append(mf)
 
             # ── Prepare data maps (logic unchanged) ──────────────────────────
             final_photo_map = st.session_state.auto_matches.copy()
