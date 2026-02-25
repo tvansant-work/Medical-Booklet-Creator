@@ -1699,6 +1699,7 @@ SEQTA_URL = "https://teach.friends.tas.edu.au/studentSummary/reporting"
 if "attachments" not in st.session_state: st.session_state.attachments = {}
 if "project_title" not in st.session_state: st.session_state.project_title = ""
 if "auto_downloaded_plans" not in st.session_state: st.session_state.auto_downloaded_plans = {}
+if "auto_downloaded_plan_files" not in st.session_state: st.session_state.auto_downloaded_plan_files = {}
 
 t1, t2 = st.tabs(["  Setup  ", "  Process & Generate  "])
 
@@ -2044,11 +2045,14 @@ with t2:
                                 )
 
                                 if file_obj:
-                                    # Store in session state keyed the same way as manual uploads
-                                    key = f"plan_upload_{sid}_{p_idx}"
-                                    st.session_state[key] = file_obj
-                                    # Also track for display
+                                    # Store auto-downloaded files in a separate dict —
+                                    # Streamlit does NOT allow setting file_uploader widget
+                                    # state programmatically, so we keep our own store and
+                                    # merge it into plan_map at generation time.
                                     plan_key = f"{sid}_{p_idx}"
+                                    if "auto_downloaded_plan_files" not in st.session_state:
+                                        st.session_state.auto_downloaded_plan_files = {}
+                                    st.session_state.auto_downloaded_plan_files[plan_key] = file_obj
                                     st.session_state.auto_downloaded_plans[plan_key] = {
                                         "filename": filename, "sid": sid, "condition": plan['condition']
                                     }
@@ -2209,11 +2213,19 @@ with t2:
             if detected:
                 for sid, plans in detected.items():
                     for idx, _ in enumerate(plans):
+                        # 1. Manual file uploader (user-uploaded)
                         k = f"plan_upload_{sid}_{idx}"
                         f = st.session_state.get(k)
                         if f:
                             if sid not in plan_map: plan_map[sid] = []
                             if f not in plan_map[sid]: plan_map[sid].append(f)
+                        # 2. Auto-downloaded file (stored separately to avoid widget conflict)
+                        plan_key = f"{sid}_{idx}"
+                        af = st.session_state.get("auto_downloaded_plan_files", {}).get(plan_key)
+                        if af and not f:  # only use auto if no manual upload overrides it
+                            if sid not in plan_map: plan_map[sid] = []
+                            af.seek(0)
+                            if af not in plan_map[sid]: plan_map[sid].append(af)
 
             if "medical_plan_files" in st.session_state:
                 for sid, fl in st.session_state.medical_plan_files.items():
