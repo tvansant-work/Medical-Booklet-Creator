@@ -78,6 +78,8 @@ st.set_page_config(
     }
 )
 
+st.markdown("<h1 style='font-size: 3.5rem; padding-bottom: 0px;'>📋 Medical Booklet Creator</h1>", unsafe_allow_html=True)
+
 try:
     with open("config.yaml", "r") as f:
         CONFIG = yaml.safe_load(f)
