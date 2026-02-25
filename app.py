@@ -136,43 +136,43 @@ def parse_tutor(text):
 def convert_file_to_images(file_obj):
     """
     Converts a file (PDF or Image) into a list of Base64 strings (one per page).
-    PDFs are converted to high-resolution images to preserve quality at A4 size.
-    This allows them to be embedded directly into the HTML in the correct position.
-    
-    CRITICAL FIX: Always seeks to beginning and reads file contents into memory first
-    to avoid file pointer issues when the same file is referenced multiple times.
+    Uses magic byte sniffing to detect file type reliably — never relies solely
+    on the .name extension, which may be absent or wrong for BytesIO/UploadedFile.
     """
     images_b64 = []
     try:
-        # CRITICAL: Read entire file into memory first to avoid file pointer issues
         file_obj.seek(0)
         file_bytes = file_obj.read()
+
+        if not file_bytes:
+            return []
+
         file_buffer = BytesIO(file_bytes)
-        
-        # 1. Handle PDF Attachments - Convert to high-res images
-        if file_obj.name.lower().endswith('.pdf'):
+        fname = getattr(file_obj, 'name', '') or ''
+
+        # Detect type by magic bytes first, then fall back to extension
+        is_pdf = file_bytes[:4] == b'%PDF'
+        is_png = file_bytes[:4] == b'\x89PNG'
+        is_jpg = file_bytes[:3] == b'\xff\xd8\xff'
+        name_says_pdf = fname.lower().endswith('.pdf')
+
+        if is_pdf or (name_says_pdf and not is_png and not is_jpg):
             with pdfplumber.open(file_buffer) as pdf:
                 for page in pdf.pages:
-                    # Render page to image at higher resolution for A4 quality
-                    # 200 DPI gives good quality for A4 medical documents
                     im = page.to_image(resolution=200).original.convert("RGB")
-                    
                     buf = BytesIO()
                     im.save(buf, format="JPEG", quality=90)
-                    b64 = base64.b64encode(buf.getvalue()).decode()
-                    images_b64.append(b64)
-                    
-        # 2. Handle Image Attachments (JPG, PNG)
+                    images_b64.append(base64.b64encode(buf.getvalue()).decode())
         else:
             img = Image.open(file_buffer).convert("RGB")
             buf = BytesIO()
             img.save(buf, format="JPEG", quality=90)
-            b64 = base64.b64encode(buf.getvalue()).decode()
-            images_b64.append(b64)
-            
+            images_b64.append(base64.b64encode(buf.getvalue()).decode())
+
+
     except Exception as e:
-        print(f"Error converting file {file_obj.name}: {e}")
-        
+        fname = getattr(file_obj, 'name', 'unknown')
+
     return images_b64
 
 def auto_download_plan(url, session_cookie, cookie_name="ASP.NET_SessionId"):
@@ -1700,6 +1700,7 @@ if "attachments" not in st.session_state: st.session_state.attachments = {}
 if "project_title" not in st.session_state: st.session_state.project_title = ""
 if "auto_downloaded_plans" not in st.session_state: st.session_state.auto_downloaded_plans = {}
 if "auto_downloaded_plan_files" not in st.session_state: st.session_state.auto_downloaded_plan_files = {}
+if "manual_plan_uploads" not in st.session_state: st.session_state.manual_plan_uploads = {}
 
 t1, t2 = st.tabs(["  Setup  ", "  Process & Generate  "])
 
@@ -2080,6 +2081,9 @@ with t2:
                             st.rerun()
 
         # ── Per-student plan list ─────────────────────────────────────────────
+        if "manual_plan_uploads" not in st.session_state:
+            st.session_state.manual_plan_uploads = {}
+
         if detected:
             for sid, plans in detected.items():
                 s_name = id_to_name_map.get(sid, sid)
@@ -2091,18 +2095,30 @@ with t2:
                             st.markdown(f"**{plan['condition']}**")
                             if plan.get('url'):
                                 st.markdown(f"[↗ Open document]({plan['url']})")
-                            # Show auto-download status if available
                             plan_key = f"{sid}_{p_idx}"
                             ad = st.session_state.get("auto_downloaded_plans", {}).get(plan_key)
                             if ad:
                                 st.caption(f"✅ Auto-downloaded: {ad['filename']}")
+                            elif st.session_state.manual_plan_uploads.get(plan_key):
+                                fname = st.session_state.manual_plan_uploads[plan_key][1]
+                                st.caption(f"✅ Uploaded: {fname}")
                         with col2:
-                            # Pre-label the uploader to indicate auto-download status
                             upload_label = f"Upload {plan['condition']}"
                             existing_key = f"plan_upload_{sid}_{p_idx}"
+                            plan_key = f"{sid}_{p_idx}"
                             if st.session_state.get("auto_downloaded_plans", {}).get(plan_key):
                                 upload_label = f"Replace {plan['condition']} (auto-downloaded)"
-                            st.file_uploader(upload_label, type=['pdf','png','jpg'], key=existing_key)
+                            uploaded = st.file_uploader(upload_label, type=['pdf','png','jpg'], key=existing_key)
+                            # Cache uploaded file as raw bytes so it survives button-click reruns.
+                            # Only update the cache when a file is actually present — never clear it.
+                            if uploaded is not None:
+                                try:
+                                    uploaded.seek(0)
+                                    raw = uploaded.read()
+                                    if raw:  # only store if non-empty
+                                        st.session_state.manual_plan_uploads[plan_key] = (raw, uploaded.name)
+                                except Exception:
+                                    pass
                     st.divider()
         else:
             st.caption("No action plans detected in student data.")
@@ -2211,40 +2227,49 @@ with t2:
             plan_map = {}
             detected = st.session_state.get('detected_plans', {})
             auto_files = st.session_state.get("auto_downloaded_plan_files", {})
-
-            print(f"\n{'='*60}")
-            print(f"PLAN MAP DEBUG")
-            print(f"detected_plans keys: {list(detected.keys())}")
-            print(f"auto_downloaded_plan_files keys: {list(auto_files.keys())}")
-            print(f"session_state keys with 'plan_upload': {[k for k in st.session_state.keys() if 'plan_upload' in k]}")
+            manual_uploads = st.session_state.get("manual_plan_uploads", {})
 
             if detected:
                 for sid, plans in detected.items():
                     for idx, _ in enumerate(plans):
                         plan_key = f"{sid}_{idx}"
+                        widget_key = f"plan_upload_{sid}_{idx}"
 
-                        # 1. Manual file uploader takes priority (user-uploaded)
-                        k = f"plan_upload_{sid}_{idx}"
-                        f = st.session_state.get(k)
-                        print(f"  [{plan_key}] widget key '{k}' -> {type(f).__name__ if f else 'None'}")
-                        if f:
-                            print(f"    manual upload: name={getattr(f,'name','?')}, size={getattr(f,'size','?')}")
-                            if sid not in plan_map: plan_map[sid] = []
-                            plan_map[sid].append(f)
+                        # Priority 1: live widget value (present on same rerun as button click)
+                        live_file = st.session_state.get(widget_key)
+                        if live_file is not None:
+                            try:
+                                live_file.seek(0)
+                                raw = live_file.read()
+                                if raw:
+                                    # Also update the persistent cache while we have it
+                                    manual_uploads[plan_key] = (raw, live_file.name)
+                                    buf = BytesIO(raw)
+                                    buf.name = live_file.name
+                                    if sid not in plan_map: plan_map[sid] = []
+                                    plan_map[sid].append(buf)
+                                    continue
+                            except Exception:
+                                pass
 
-                        # 2. Auto-downloaded: reconstruct fresh BytesIO from stored bytes
-                        elif plan_key in auto_files:
+                        # Priority 2: cached manual upload (raw bytes, survives reruns)
+                        if plan_key in manual_uploads:
+                            raw_bytes, fname = manual_uploads[plan_key]
+                            if raw_bytes:
+                                buf = BytesIO(raw_bytes)
+                                buf.name = fname
+                                if sid not in plan_map: plan_map[sid] = []
+                                plan_map[sid].append(buf)
+                                continue
+
+                        # Priority 3: auto-downloaded file
+                        if plan_key in auto_files:
                             raw_bytes, fname = auto_files[plan_key]
-                            print(f"    auto-download: fname={fname}, bytes={len(raw_bytes)}")
-                            buf = BytesIO(raw_bytes)
-                            buf.name = fname  # needed by convert_file_to_images
-                            if sid not in plan_map: plan_map[sid] = []
-                            plan_map[sid].append(buf)
-                        else:
-                            print(f"    NO FILE - neither manual nor auto-download found")
-
-            print(f"Final plan_map: { {k: len(v) for k,v in plan_map.items()} }")
-            print(f"{'='*60}\n")
+                            if raw_bytes:
+                                buf = BytesIO(raw_bytes)
+                                buf.name = fname
+                                if sid not in plan_map: plan_map[sid] = []
+                                plan_map[sid].append(buf)
 
             if "medical_plan_files" in st.session_state:
                 for sid, fl in st.session_state.medical_plan_files.items():
@@ -2255,8 +2280,17 @@ with t2:
             for entry in st.session_state.get("manual_plans_store", []):
                 msid = entry['sid']
                 mf = entry['file']
-                if msid not in plan_map: plan_map[msid] = []
-                plan_map[msid].append(mf)
+                if mf is not None:
+                    try:
+                        mf.seek(0)
+                        raw = mf.read()
+                        if raw:
+                            buf = BytesIO(raw)
+                            buf.name = getattr(mf, 'name', 'plan.pdf')
+                            if msid not in plan_map: plan_map[msid] = []
+                            plan_map[msid].append(buf)
+                    except Exception:
+                        pass
 
             # ── Prepare data maps (logic unchanged) ──────────────────────────
             final_photo_map = st.session_state.auto_matches.copy()
@@ -2352,13 +2386,9 @@ with t2:
                 embedded = []
                 if sid in plan_map:
                     for f in plan_map[sid]:
-                        fname_debug = getattr(f, 'name', 'unknown')
-                        result = convert_file_to_images(f)
-                        print(f"  convert_file_to_images({fname_debug}) -> {len(result)} image(s)")
-                        embedded.extend(result)
+                        embedded.extend(convert_file_to_images(f))
                 if sid in st.session_state.attachments:
                     for f in st.session_state.attachments[sid]: embedded.extend(convert_file_to_images(f))
-                print(f"  Student {sid}: {len(embedded)} embedded image(s) total")
 
                 med_l = raw_med.lower()
                 c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phone']['display']})" if parsed_con else ""
