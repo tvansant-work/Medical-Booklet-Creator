@@ -47,6 +47,8 @@ if 'dietary_unmatched' not in st.session_state:
     st.session_state.dietary_unmatched = []
 if 'dietary_manual_selections' not in st.session_state:
     st.session_state.dietary_manual_selections = {} # Stores { 'dietary_idx': 'student_id' }
+if 'photo_permissions_map' not in st.session_state:
+    st.session_state.photo_permissions_map = {} # Stores { 'student_id': 'Yes'|'No'|'No Response' }
 import pandas as pd
 import zipfile
 import yaml
@@ -969,6 +971,102 @@ def match_dietary_requirements(df_main, dietary_csv, contact_csv=None):
         print(traceback.format_exc())
         return {}, []
 
+def match_photo_permissions(df_main, photo_perm_csv):
+    """
+    Matches students with photo permission responses.
+    Deduplicates by email (keep most recent), then matches by surname.
+    Returns dict of {student_id: 'Yes'|'No'|'No Response'}
+    """
+    try:
+        if hasattr(photo_perm_csv, 'seek'):
+            photo_perm_csv.seek(0)
+
+        df = pd.read_csv(photo_perm_csv).fillna("")
+
+        print(f"\n{'='*80}")
+        print("PHOTO PERMISSIONS MATCHING")
+        print(f"{'='*80}")
+        print(f"Columns: {list(df.columns)}")
+        print(f"Total raw rows: {len(df)}")
+
+        col_email   = df.columns[0]
+        col_first   = df.columns[1]
+        col_surname = df.columns[2]
+        col_time    = df.columns[3]
+        q_cols      = [df.columns[-2], df.columns[-1]]
+
+        print(f"  Email col: '{col_email}'")
+        print(f"  Surname col: '{col_surname}'")
+        print(f"  Q1: '{q_cols[0]}'")
+        print(f"  Q2: '{q_cols[1]}'")
+
+        # Step 1: deduplicate by email, keep most recent submission
+        df[col_time] = pd.to_datetime(df[col_time], errors='coerce')
+        has_email = df[df[col_email].astype(str).str.strip() != ""]
+        no_email  = df[df[col_email].astype(str).str.strip() == ""]
+        deduped = (
+            has_email
+            .sort_values(col_time, ascending=False)
+            .drop_duplicates(subset=[col_email], keep='first')
+        )
+        df_deduped = pd.concat([deduped, no_email], ignore_index=True)
+        removed = len(df) - len(df_deduped)
+        print(f"  Removed {removed} duplicate submissions (kept most recent per email)")
+
+        # Step 2: build surname lookup from permissions data
+        perm_by_surname = {}
+        for _, row in df_deduped.iterrows():
+            sname = str(row[col_surname]).strip().lower()
+            if sname:
+                perm_by_surname.setdefault(sname, []).append(row)
+
+        # Step 3: identify duplicate surnames in student list
+        surname_counts = {}
+        for _, row in df_main.iterrows():
+            s = str(row[COLS['surname']]).strip().lower()
+            if s:
+                surname_counts[s] = surname_counts.get(s, 0) + 1
+        duplicate_surnames = {s for s, c in surname_counts.items() if c > 1}
+
+        permissions = {}
+        for _, student_row in df_main.iterrows():
+            student_id = str(student_row[COLS['student_id']])
+            surname    = str(student_row[COLS['surname']]).strip().lower()
+
+            if not surname:
+                permissions[student_id] = 'No Response'
+                continue
+
+            candidates = perm_by_surname.get(surname, [])
+            if not candidates:
+                permissions[student_id] = 'No Response'
+                continue
+
+            # Use first candidate (after dedup, most recent per family)
+            matched_row = candidates[0]
+
+            q1 = str(matched_row[q_cols[0]]).strip().lower()
+            q2 = str(matched_row[q_cols[1]]).strip().lower()
+
+            if q1 == 'yes' and q2 == 'yes':
+                permissions[student_id] = 'Yes'
+            else:
+                permissions[student_id] = 'No'
+
+        yes_count = sum(1 for v in permissions.values() if v == 'Yes')
+        no_count  = sum(1 for v in permissions.values() if v == 'No')
+        nr_count  = sum(1 for v in permissions.values() if v == 'No Response')
+        print(f"\nResults: Yes={yes_count}  No={no_count}  No Response={nr_count}")
+        print(f"{'='*80}\n")
+        return permissions
+
+    except Exception as e:
+        import traceback
+        print(f"Error processing photo permissions CSV: {e}")
+        print(traceback.format_exc())
+        return {}
+
+
 def get_swimming_display_color(ability):
     """
     Returns color class based on swimming ability.
@@ -1752,7 +1850,7 @@ with t1:
     # ── Optional documents ────────────────────────────────────────────────────
     st.markdown('<div class="section-head">Optional — from Paperly forms</div>', unsafe_allow_html=True)
 
-    col_c, col_d, col_e = st.columns(3)
+    col_c, col_d, col_e, col_f = st.columns(4)
     with col_c:
         st.markdown("""
         <div class="upload-card optional">
@@ -1779,6 +1877,15 @@ with t1:
         </div>
         """, unsafe_allow_html=True)
         dietary_csv = st.file_uploader("Dietary Requirements CSV", type="csv", label_visibility="collapsed")
+
+    with col_f:
+        st.markdown("""
+        <div class="upload-card optional">
+          <div class="upload-card-label">Photo Permissions CSV</div>
+          <div class="upload-card-desc">Adds photo permission status to each profile and generates a no-permission list.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        photo_perm_csv = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed")
 
     # ── File processing (logic unchanged) ─────────────────────────────────────
     if csv:
@@ -1823,6 +1930,10 @@ with t1:
     if dietary_csv:
         st.session_state.dietary_csv = dietary_csv
         st.success("✅ Dietary requirements CSV loaded")
+
+    if photo_perm_csv:
+        st.session_state.photo_perm_csv = photo_perm_csv
+        st.success("✅ Photo permissions CSV loaded")
 
     if photos:
         path = os.path.join(TEMP_DIR, "photos.pdf")
@@ -1878,6 +1989,10 @@ with t2:
                 st.session_state.dietary_matched = dietary_matched
                 st.session_state.dietary_unmatched = dietary_unmatched
                 st.session_state.dietary_manual_selections = {}
+
+            if 'photo_perm_csv' in st.session_state:
+                perm_map = match_photo_permissions(df_final, st.session_state.photo_perm_csv)
+                st.session_state.photo_permissions_map = perm_map
 
             st.rerun()
 
@@ -1961,6 +2076,17 @@ with t2:
                         st.divider()
             else:
                 st.success(f"✅ All {total_diet_matched} dietary records matched automatically")
+
+        # Photo permissions summary
+        if 'photo_perm_csv' in st.session_state:
+            perm_map = st.session_state.get('photo_permissions_map', {})
+            no_count = sum(1 for v in perm_map.values() if v == 'No')
+            nr_count = sum(1 for v in perm_map.values() if v == 'No Response')
+            yes_count = sum(1 for v in perm_map.values() if v == 'Yes')
+            if no_count + nr_count > 0:
+                st.warning(f"📷 Photo Permissions: {yes_count} Yes · {no_count} No · {nr_count} No Response")
+            else:
+                st.success(f"✅ Photo Permissions: All {yes_count} students have given permission")
 
         # ── Step 3: Medical plans ─────────────────────────────────────────────
         st.markdown('<div class="section-head">Step 3 — Medical action plans</div>', unsafe_allow_html=True)
@@ -2191,13 +2317,15 @@ with t2:
             has_swimming     = 'swimming_csv' in st.session_state
             has_dietary      = 'dietary_csv' in st.session_state
             has_contact_csv  = 'contact_csv_df' in st.session_state
+            has_photo_perm   = 'photo_perm_csv' in st.session_state
 
-            if has_swimming or has_dietary or has_contact_csv:
+            if has_swimming or has_dietary or has_contact_csv or has_photo_perm:
                 st.markdown("---")
                 st.markdown('<div class="options-card-title">Additional data</div>', unsafe_allow_html=True)
-            opt_swimming = st.checkbox("Swimming ability",      value=True) if has_swimming else False
-            opt_dietary  = st.checkbox("Dietary requirements",  value=True) if has_dietary  else False
-            opt_sec_home = st.checkbox("Home contacts",         value=True) if has_contact_csv else False
+            opt_swimming   = st.checkbox("Swimming ability",      value=True) if has_swimming   else False
+            opt_dietary    = st.checkbox("Dietary requirements",  value=True) if has_dietary    else False
+            opt_sec_home   = st.checkbox("Home contacts",         value=True) if has_contact_csv else False
+            opt_photo_perm = st.checkbox("Photo permissions",     value=True) if has_photo_perm else False
 
         with col2:
             st.markdown('<div class="options-card-title">Profile sections</div>', unsafe_allow_html=True)
@@ -2312,6 +2440,8 @@ with t2:
                             final_dietary_map[student_id] = item['dietary_req']
                             break
 
+            final_photo_perm_map = st.session_state.get('photo_permissions_map', {}).copy()
+
             print(f"\n{'='*80}")
             print("SWIMMING ABILITY MAP FOR PDF GENERATION")
             print(f"{'='*80}")
@@ -2332,7 +2462,8 @@ with t2:
             display_opts = {
                 "year": opt_year, "roll": opt_roll, "house": opt_house,
                 "dob": opt_dob, "tutor": opt_tutor, "sid": opt_sid,
-                "swimming": opt_swimming, "dietary": opt_dietary
+                "swimming": opt_swimming, "dietary": opt_dietary,
+                "photo_perm": opt_photo_perm
             }
 
             all_records = []
@@ -2393,15 +2524,17 @@ with t2:
                 med_l = raw_med.lower()
                 c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phone']['display']})" if parsed_con else ""
 
-                swim_ability = final_swimming_map.get(sid, "Data not recorded")
-                swim_color   = get_swimming_display_color(swim_ability)
-                dietary_req  = final_dietary_map.get(sid, "No data given")
+                swim_ability    = final_swimming_map.get(sid, "Data not recorded")
+                swim_color      = get_swimming_display_color(swim_ability)
+                dietary_req     = final_dietary_map.get(sid, "No data given")
+                photo_perm_val  = final_photo_perm_map.get(sid, None)
 
                 profile_obj = {
                     "id": sid, "link_id": link_id, "first": fname, "last": sname,
                     "year": year_lvl, "roll": roll, "house": house, "dob": dob, "tutor": tutor,
                     "swimming": swim_ability, "swim_color": swim_color,
                     "dietary": dietary_req,
+                    "photo_perm": photo_perm_val,
                     "photo": img_to_base64(final_photo_map.get(sid)),
                     "sections": sections, "attachments": embedded
                 }
@@ -2428,10 +2561,16 @@ with t2:
                 m_list   = [r['matrix']  for r in records]
                 med_list = [r['medical'] for r in records if r['medical']]
                 m_list.sort(key=lambda x: x['name'])
+                # Build no-permission list for the photo permissions page
+                no_perm_list = [
+                    s for s in s_list
+                    if s.get('photo_perm') in ('No', 'No Response')
+                ] if display_opts.get('photo_perm') else []
                 full_html = tpl.render(
                     title=f"{st.session_state.project_title} {title_suffix}",
                     date=datetime.now().strftime("%d %B %Y"),
                     students=s_list, matrix=m_list, medical_full=med_list,
+                    no_perm_list=no_perm_list,
                     options=display_opts, mode="full"
                 )
                 return HTML(string=full_html).write_pdf()

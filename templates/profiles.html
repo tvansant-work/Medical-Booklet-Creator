@@ -99,6 +99,20 @@
     .dietary-no-concerns { color: #999; font-style: italic; }  /* No concerns listed - faded gray */
     .dietary-text { color: #333; }  /* Has actual dietary requirements */
 
+    /* PHOTO PERMISSIONS */
+    .perm-yes  { color: #222; font-weight: bold; }
+    .perm-no   { color: #d32f2f; font-weight: bold; }
+    .perm-nr   { color: #e65100; font-weight: bold; }
+
+    /* NO-PERMISSION GRID */
+    .no-perm-grid { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
+    .no-perm-item { width: 18%; text-align: center; }
+    .no-perm-img  { width: 100%; height: 90px; object-fit: contain; border: 1px solid #f44336; margin-bottom: 4px; }
+    .no-perm-name { font-size: 9pt; font-weight: bold; line-height: 1.2; }
+    .no-perm-badge { font-size: 8pt; font-weight: bold; padding: 1px 5px; border-radius: 3px; display: inline-block; margin-top: 2px; }
+    .no-perm-badge-no { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
+    .no-perm-badge-nr { background: #fff3e0; color: #e65100; border: 1px solid #ffb74d; }
+
     /* ATTACHMENT PAGES (New) */
     .attachment-page {
         page-break-before: always;
@@ -175,6 +189,32 @@
             {% endfor %}
         </tbody>
     </table>
+    <div class="page-break"></div>
+    {% endif %}
+
+    {% if options.photo_perm and no_perm_list %}
+    <h3>Photo Permissions — No / No Response</h3>
+    <p style="font-size:10pt; color:#555; margin-bottom:8px;">
+        The following students have <strong>not given permission</strong> or have <strong>not responded</strong>.
+        Please ensure photos of these students are not shared without explicit approval.
+    </p>
+    <div class="no-perm-grid">
+        {% for s in no_perm_list %}
+        <div class="no-perm-item no-break">
+            {% if s.photo %}
+                <img class="no-perm-img" src="data:image/jpeg;base64,{{ s.photo }}">
+            {% else %}
+                <div class="no-perm-img" style="display:flex;align-items:center;justify-content:center;color:#ccc;font-size:9px;border:1px dashed #ccc;">NO PHOTO</div>
+            {% endif %}
+            <div class="no-perm-name">{{ s.first }}<br>{{ s.last }}</div>
+            {% if s.photo_perm == 'No' %}
+                <span class="no-perm-badge no-perm-badge-no">No Permission</span>
+            {% else %}
+                <span class="no-perm-badge no-perm-badge-nr">No Response</span>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
     <div class="page-break"></div>
     {% endif %}
 
@@ -258,6 +298,14 @@
                         </div>
                         {% if options.dob and s.dob %}<div class="meta-row"><span><label>DOB:</label>{{ s.dob }}</span></div>{% endif %}
                         {% if options.tutor and s.tutor %}<div class="meta-row"><span><label>Tutor:</label>{{ s.tutor }}</span></div>{% endif %}
+                        {% if options.photo_perm and s.photo_perm %}
+                        <div class="meta-row"><span><label>Photo Permissions:</label>
+                            {% if s.photo_perm == 'Yes' %}<span class="perm-yes">Yes</span>
+                            {% elif s.photo_perm == 'No' %}<span class="perm-no">No</span>
+                            {% else %}<span class="perm-nr">No Response</span>
+                            {% endif %}
+                        </span></div>
+                        {% endif %}
                         {% if options.sid %}<div class="meta-row"><span><label>Student ID:</label>{{ s.id }}</span></div>{% endif %}
                     </div>
                 </div>
