@@ -967,7 +967,26 @@ def match_photo_permissions(df_main, photo_perm_csv):
             emerg_text  = str(student_row.get(COLS['emergency_notes'], '')).strip()
             emerg_names = parse_emergency_contact_names(emerg_text)
 
+            # Build the student's own name variants to exclude self-matches.
+            # A student's own name should never be treated as an emergency contact.
+            s_first     = str(student_row[COLS['first_name']]).strip().lower()
+            s_pref      = str(student_row.get('Preferred name', '')).strip().lower()
+            s_surname   = str(student_row[COLS['surname']]).strip().lower()
+
             for emerg_name in emerg_names:
+                # Skip if this emergency contact name is the student themselves
+                emerg_parts = emerg_name.split()
+                if len(emerg_parts) >= 2:
+                    emerg_first   = emerg_parts[0]
+                    emerg_surname = emerg_parts[-1]
+                    is_student = (
+                        emerg_surname == s_surname and
+                        (emerg_first == s_first or (s_pref and emerg_first == s_pref))
+                    )
+                    if is_student:
+                        print(f"  [skip] emergency contact '{emerg_name}' matches student's own name — ignored")
+                        continue
+
                 for perm in perm_records:
                     if _name_matches_perm(emerg_name, perm):
                         tier_desc = (f"emergency contact '{emerg_name}' "
