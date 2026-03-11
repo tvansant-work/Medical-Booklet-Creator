@@ -193,6 +193,7 @@
     {% endif %}
 
     {% if options.photo_perm and no_perm_list %}
+    <div style="page-break-inside: avoid;">
     <h3>Photo Permissions — No / No Response</h3>
     <p style="font-size:10pt; color:#555; margin-bottom:8px;">
         The following students have <strong>not given permission</strong> or have <strong>not responded</strong>.
@@ -200,7 +201,8 @@
     </p>
     <div class="no-perm-grid">
         {% for s in no_perm_list %}
-        <div class="no-perm-item no-break">
+        <div class="no-perm-item">
+            <a href="#student-{{ s.link_id }}" style="text-decoration:none; color:inherit; display:block;">
             {% if s.photo %}
                 <img class="no-perm-img" src="data:image/jpeg;base64,{{ s.photo }}">
             {% else %}
@@ -212,8 +214,10 @@
             {% else %}
                 <span class="no-perm-badge no-perm-badge-nr">No Response</span>
             {% endif %}
+            </a>
         </div>
         {% endfor %}
+    </div>
     </div>
     <div class="page-break"></div>
     {% endif %}
@@ -435,6 +439,8 @@
 
     <div class="page-break"></div>
     {% endfor %}
+
+    <div style="page-break-before: always; height: 100vh; background: #ffffff;"></div>
 
 </body>
 </html>

@@ -875,11 +875,14 @@ def match_photo_permissions(df_main, photo_perm_csv):
     Matches photo permission responses to students using a three-tier strategy:
 
     Tier 1 — Emergency contacts from the student list CSV.
-             Matches the parent's full name (First Name + Surname from the
-             permissions CSV) against names parsed from each student's
-             Emergency Notes field. Works with no optional files uploaded.
+             Matches the parent's first name AND surname (both required as
+             whole words) against names parsed from each student's Emergency
+             Notes field. Works with no optional files uploaded.
     Tier 2 — Contact CSV SC1/SC2 Surname lookup (if Attendance CSV uploaded).
-    Tier 3 — Student's own surname as a last-resort fallback.
+
+    No surname-only fallback is used — parent name must explicitly appear
+    in a student's emergency contacts or contact CSV to count as a match.
+    Students with no match are marked 'No Response'.
 
     A student is 'Yes' only if BOTH questions are answered 'Yes'.
     Any 'No' answer → 'No'. No match found → 'No Response'.
@@ -976,29 +979,6 @@ def match_photo_permissions(df_main, photo_perm_csv):
                         matched_result = perm['result']
                         matched_tier   = f"contact CSV surname '{perm['surname']}'"
                         break
-
-            # ── Tier 3: student's own surname matched against perm first + last
-            if matched_result is None:
-                s_surname = str(student_row[COLS['surname']]).strip().lower()
-                s_first   = str(student_row[COLS['first_name']]).strip().lower()
-                s_pref    = str(student_row.get('Preferred name', '')).strip().lower()
-                for perm in perm_records:
-                    if perm['surname'] == s_surname:
-                        # Also require the parent first name to match student
-                        # first or preferred name (guards against siblings with
-                        # same surname being assigned the wrong parent entry)
-                        first_pat = r'\b' + re.escape(perm['first']) + r'\b'
-                        first_matches_student = (
-                            re.search(first_pat, s_first) or
-                            (s_pref and re.search(first_pat, s_pref))
-                        )
-                        # If surnames match and either first names match OR
-                        # there's only one perm record with this surname, accept it
-                        surname_count = sum(1 for p in perm_records if p['surname'] == s_surname)
-                        if first_matches_student or surname_count == 1:
-                            matched_result = perm['result']
-                            matched_tier   = f"student surname '{s_surname}'"
-                            break
 
             # Apply result — a 'No' always wins over an existing value
             if matched_result is not None:
