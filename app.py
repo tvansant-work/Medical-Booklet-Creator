@@ -956,37 +956,47 @@ def match_photo_permissions(df_main, photo_perm_csv):
         for _, student_row in df_main.iterrows():
             sid = str(student_row[COLS['student_id']])
 
+            # Collect ALL confirmed matches for this student across all tiers.
+            # A confirmed match means the parent name was explicitly found in
+            # this student's emergency contacts or contact CSV — not just a
+            # surname coincidence with an unrelated person.
+            # "No wins" only among confirmed matches for the same student.
+            confirmed_matches = []  # list of (result, tier_description)
+
             # ── Tier 1: match parent first + last name against emergency contacts
             emerg_text  = str(student_row.get(COLS['emergency_notes'], '')).strip()
-            emerg_names = parse_emergency_contact_names(emerg_text)  # ["jessica gray", ...]
-            matched_result = None
-            matched_tier   = None
+            emerg_names = parse_emergency_contact_names(emerg_text)
 
             for emerg_name in emerg_names:
                 for perm in perm_records:
                     if _name_matches_perm(emerg_name, perm):
-                        matched_result = perm['result']
-                        matched_tier   = (f"emergency contact '{emerg_name}' "
-                                          f"matched '{perm['first']} {perm['surname']}'")
-                        break
-                if matched_result is not None:
-                    break
+                        tier_desc = (f"emergency contact '{emerg_name}' "
+                                     f"matched '{perm['first']} {perm['surname']}'")
+                        confirmed_matches.append((perm['result'], tier_desc))
+                        # Keep going — don't break. A student may have two parents
+                        # both listed as emergency contacts who both filled the form.
 
             # ── Tier 2: Contact CSV SC1/SC2 surname + first name ─────────────
-            if matched_result is None and using_contact:
+            if not confirmed_matches and using_contact:
                 for perm in perm_records:
                     if sid in parent_lookup.get(perm['surname'], set()):
-                        matched_result = perm['result']
-                        matched_tier   = f"contact CSV surname '{perm['surname']}'"
-                        break
+                        tier_desc = f"contact CSV '{perm['first']} {perm['surname']}'"
+                        confirmed_matches.append((perm['result'], tier_desc))
 
-            # Apply result — a 'No' always wins over an existing value
-            if matched_result is not None:
-                if permissions[sid] == 'No Response' or matched_result == 'No':
-                    permissions[sid] = matched_result
-                    print(f"  {matched_result:3s} ← student {sid} via {matched_tier}")
+            # ── Resolve: among confirmed matches, No wins only over Yes.
+            # An unrelated person sharing a surname is never in confirmed_matches
+            # so their No cannot affect this student.
+            if confirmed_matches:
+                # If any confirmed parent said No, result is No
+                if any(r == 'No' for r, _ in confirmed_matches):
+                    final_result = 'No'
+                else:
+                    final_result = 'Yes'
+                tiers = ', '.join(t for _, t in confirmed_matches)
+                permissions[sid] = final_result
+                print(f"  {final_result:3s} ← student {sid} via {tiers}")
             else:
-                print(f"  --- ← student {sid} — no match found (No Response)")
+                print(f"  --- ← student {sid} — no confirmed match (No Response)")
 
         yes_count = sum(1 for v in permissions.values() if v == 'Yes')
         no_count  = sum(1 for v in permissions.values() if v == 'No')
