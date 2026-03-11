@@ -901,31 +901,38 @@ def match_photo_permissions(df_main, photo_perm_csv):
         print(f"  Q1: '{q_cols[0]}'")
         print(f"  Q2: '{q_cols[1]}'")
 
-        # ── Build permission lookup: parent full name (lower) -> result ──────
-        # Key is "firstname surname" to maximise specificity
-        perm_by_fullname = {}   # "jessica gray" -> result
-        perm_by_surname  = {}   # "gray"         -> result (fallback)
+        # ── Build permission records list: [{first, surname, result}] ─────
+        # Store each parent as separate fields so we can match first AND last
+        # independently against emergency contact names.
+        perm_records = []
         for _, row in df.iterrows():
             p_first   = str(row[col_first]).strip().lower()
             p_surname = str(row[col_surname]).strip().lower()
             q1 = str(row[q_cols[0]]).strip().lower()
             q2 = str(row[q_cols[1]]).strip().lower()
             result = 'Yes' if (q1 == 'yes' and q2 == 'yes') else 'No'
-
             if p_first and p_surname:
-                full = f"{p_first} {p_surname}"
-                # Never downgrade an existing 'No' result for same parent
-                if full not in perm_by_fullname or result == 'No':
-                    perm_by_fullname[full] = result
-            if p_surname:
-                if p_surname not in perm_by_surname or result == 'No':
-                    perm_by_surname[p_surname] = result
+                perm_records.append({'first': p_first, 'surname': p_surname, 'result': result})
+
+        def _name_matches_perm(emerg_name_lower, perm):
+            """
+            Returns True if the permission record's first name AND surname
+            both appear as whole words within the emergency contact name string.
+            Handles middle names and any word order.
+            e.g. emerg_name = "jessica anne gray"
+                 perm first="jessica" surname="gray" → True
+                 perm first="jessica" surname="smith" → False
+            """
+            first_pat   = r'\b' + re.escape(perm['first'])   + r'\b'
+            surname_pat = r'\b' + re.escape(perm['surname']) + r'\b'
+            return (re.search(first_pat, emerg_name_lower) is not None and
+                    re.search(surname_pat, emerg_name_lower) is not None)
 
         # ── Tier 2 prep: SC1/SC2 surname lookup from contact CSV ─────────────
         contact_df    = st.session_state.get('contact_csv_df', None)
         parent_lookup = _build_parent_surname_lookup(contact_df)   # surname -> {sid,...}
         using_contact = bool(parent_lookup)
-        print(f"Emergency contacts: always active")
+        print(f"Emergency contacts: always active (first + last name required)")
         print(f"Contact CSV (SC1/SC2): {using_contact} ({len(parent_lookup)} surnames indexed)")
 
         # ── Tier 3 prep: student own-surname lookup ───────────────────────────
@@ -946,43 +953,52 @@ def match_photo_permissions(df_main, photo_perm_csv):
         for _, student_row in df_main.iterrows():
             sid = str(student_row[COLS['student_id']])
 
-            # ── Tier 1: match parent full name against emergency contacts ─────
-            emerg_text   = str(student_row.get(COLS['emergency_notes'], '')).strip()
-            emerg_names  = parse_emergency_contact_names(emerg_text)  # ["jessica gray", ...]
+            # ── Tier 1: match parent first + last name against emergency contacts
+            emerg_text  = str(student_row.get(COLS['emergency_notes'], '')).strip()
+            emerg_names = parse_emergency_contact_names(emerg_text)  # ["jessica gray", ...]
             matched_result = None
             matched_tier   = None
 
             for emerg_name in emerg_names:
-                # Try exact full-name match first
-                if emerg_name in perm_by_fullname:
-                    matched_result = perm_by_fullname[emerg_name]
-                    matched_tier   = f"emergency contact full name '{emerg_name}'"
+                for perm in perm_records:
+                    if _name_matches_perm(emerg_name, perm):
+                        matched_result = perm['result']
+                        matched_tier   = (f"emergency contact '{emerg_name}' "
+                                          f"matched '{perm['first']} {perm['surname']}'")
+                        break
+                if matched_result is not None:
                     break
-                # Try surname-only within the emergency contact name
-                parts = emerg_name.split()
-                if parts:
-                    emerg_surname = parts[-1]   # last word is typically the surname
-                    if emerg_surname in perm_by_fullname or emerg_surname in perm_by_surname:
-                        candidate = perm_by_fullname.get(emerg_surname) or perm_by_surname.get(emerg_surname)
-                        matched_result = candidate
-                        matched_tier   = f"emergency contact surname '{emerg_surname}'"
-                        break
 
-            # ── Tier 2: Contact CSV SC1/SC2 surname ──────────────────────────
+            # ── Tier 2: Contact CSV SC1/SC2 surname + first name ─────────────
             if matched_result is None and using_contact:
-                # Find this student's SC1/SC2 surnames via the contact lookup
-                for p_surname, candidate_result in perm_by_surname.items():
-                    if sid in parent_lookup.get(p_surname, set()):
-                        matched_result = candidate_result
-                        matched_tier   = f"contact CSV surname '{p_surname}'"
+                for perm in perm_records:
+                    if sid in parent_lookup.get(perm['surname'], set()):
+                        matched_result = perm['result']
+                        matched_tier   = f"contact CSV surname '{perm['surname']}'"
                         break
 
-            # ── Tier 3: student's own surname ────────────────────────────────
+            # ── Tier 3: student's own surname matched against perm first + last
             if matched_result is None:
                 s_surname = str(student_row[COLS['surname']]).strip().lower()
-                if s_surname in perm_by_surname:
-                    matched_result = perm_by_surname[s_surname]
-                    matched_tier   = f"student surname '{s_surname}'"
+                s_first   = str(student_row[COLS['first_name']]).strip().lower()
+                s_pref    = str(student_row.get('Preferred name', '')).strip().lower()
+                for perm in perm_records:
+                    if perm['surname'] == s_surname:
+                        # Also require the parent first name to match student
+                        # first or preferred name (guards against siblings with
+                        # same surname being assigned the wrong parent entry)
+                        first_pat = r'\b' + re.escape(perm['first']) + r'\b'
+                        first_matches_student = (
+                            re.search(first_pat, s_first) or
+                            (s_pref and re.search(first_pat, s_pref))
+                        )
+                        # If surnames match and either first names match OR
+                        # there's only one perm record with this surname, accept it
+                        surname_count = sum(1 for p in perm_records if p['surname'] == s_surname)
+                        if first_matches_student or surname_count == 1:
+                            matched_result = perm['result']
+                            matched_tier   = f"student surname '{s_surname}'"
+                            break
 
             # Apply result — a 'No' always wins over an existing value
             if matched_result is not None:
