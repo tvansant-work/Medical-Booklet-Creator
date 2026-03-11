@@ -548,27 +548,36 @@ def parse_emergency_contact_names(emergency_text):
 def _build_parent_surname_lookup(contact_df):
     """
     Given the contact/attendance dataframe (already merged), build a dict:
-        { parent_surname_lower: [student_id, ...] }
-    using SC1 Surname and SC2 Surname columns.
+        { parent_surname_lower: [ {sid, first_lower}, ... ] }
+    using SC1/SC2 Preferred + Surname columns.
+    Each entry stores both the student ID and the parent's first name so
+    callers can require a first-name match, not just a surname match.
     Returns an empty dict if contact_df is None or columns are missing.
     """
-    lookup = {}  # surname_lower -> set of student_ids
+    lookup = {}  # surname_lower -> list of {sid, first}
     if contact_df is None:
         return lookup
 
-    c_map  = CONFIG.get('contact_file_mappings', {})
-    id_col = c_map.get('join_key', 'ID')
-    sc1_sur = c_map.get('sc1_name_sur', 'SC1 Surname')
-    sc2_sur = c_map.get('sc2_name_sur', 'SC2 Surname')
+    c_map    = CONFIG.get('contact_file_mappings', {})
+    id_col   = c_map.get('join_key', 'ID')
+    sc1_sur  = c_map.get('sc1_name_sur',  'SC1 Surname')
+    sc2_sur  = c_map.get('sc2_name_sur',  'SC2 Surname')
+    sc1_pref = c_map.get('sc1_name_pref', 'SC1 Preferred')
+    sc2_pref = c_map.get('sc2_name_pref', 'SC2 Preferred')
 
     for _, row in contact_df.iterrows():
         sid = str(row.get(id_col, '')).strip()
         if not sid:
             continue
-        for col in [sc1_sur, sc2_sur]:
-            val = str(row.get(col, '')).strip().lower()
-            if val and val not in ('nan', ''):
-                lookup.setdefault(val, set()).add(sid)
+        for sur_col, first_col in [(sc1_sur, sc1_pref), (sc2_sur, sc2_pref)]:
+            sur   = str(row.get(sur_col,   '')).strip().lower()
+            first = str(row.get(first_col, '')).strip().lower()
+            if sur and sur not in ('nan', ''):
+                lookup.setdefault(sur, [])
+                # Avoid duplicate entries for the same sid+first
+                entry = {'sid': sid, 'first': first}
+                if entry not in lookup[sur]:
+                    lookup[sur].append(entry)
 
     return lookup
 
@@ -995,12 +1004,27 @@ def match_photo_permissions(df_main, photo_perm_csv):
                         # Keep going — don't break. A student may have two parents
                         # both listed as emergency contacts who both filled the form.
 
-            # ── Tier 2: Contact CSV SC1/SC2 surname + first name ─────────────
+            # ── Tier 2: Contact CSV SC1/SC2 — match perm first+last against
+            #            the SC1/SC2 preferred+surname linked to this student
             if not confirmed_matches and using_contact:
                 for perm in perm_records:
-                    if sid in parent_lookup.get(perm['surname'], set()):
-                        tier_desc = f"contact CSV '{perm['first']} {perm['surname']}'"
-                        confirmed_matches.append((perm['result'], tier_desc))
+                    entries = parent_lookup.get(perm['surname'], [])
+                    for entry in entries:
+                        if entry['sid'] != sid:
+                            continue
+                        # Surname matches and is linked to this student.
+                        # Also require first name to match (or be blank in contact CSV).
+                        contact_first = entry['first']
+                        first_pat = r'\b' + re.escape(perm['first']) + r'\b'
+                        first_ok = (
+                            not contact_first or
+                            contact_first in ('nan', '') or
+                            re.search(first_pat, contact_first) is not None
+                        )
+                        if first_ok:
+                            tier_desc = f"contact CSV '{perm['first']} {perm['surname']}'"
+                            confirmed_matches.append((perm['result'], tier_desc))
+                            break
 
             # ── Resolve: among confirmed matches, No wins only over Yes.
             # An unrelated person sharing a surname is never in confirmed_matches
