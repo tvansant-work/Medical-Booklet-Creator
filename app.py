@@ -598,90 +598,124 @@ def _read_and_dedup_csv(file_obj):
 
 def match_swimming_ability(df_main, swimming_csv, contact_df=None):
     """
-    Matches swimming ability to students using a three-tier strategy:
+    Matches swimming ability to students by searching for the student's surname
+    within the 'Student' column of the swimming CSV.
 
-    Tier 1 — Contact CSV parent surnames (SC1/SC2 Surname) linked to student IDs.
-             Handles mismatched parent/student surnames (blended families etc.).
-    Tier 2 — Student's own surname as a fallback.
-    Tier 3 — Unmatched: surfaced in the manual-assignment UI.
+    CSV format (7 cols, 6 headers — Email used as implicit index by pandas):
+      Email, First Name, Surname, Student, Submission Time, [Status], Swimming Ability
 
-    CSV format: Email, First Name, Surname, Submission Time, Status, Swimming Ability
+    Read with explicit column names to avoid the index-shift problem.
+
+    Strategy:
+    - Unique surname  → match if surname appears as a whole word in Student field
+    - Duplicate surnames → require surname + first/preferred name both present
+    - Deduplicates by email, keeping the most recent submission
     """
     if swimming_csv is None:
         print("\n⚠️  No swimming CSV provided - skipping")
         return {}, []
 
     try:
-        swim_df = _read_and_dedup_csv(swimming_csv)
+        if hasattr(swimming_csv, 'seek'):
+            swimming_csv.seek(0)
 
-        col_surname = swim_df.columns[2]
-        ability_col = swim_df.columns[-1]
+        col_names = ['Email', 'First Name', 'Surname', 'Student', 'Submission Time', 'Status', 'Swimming Ability']
+        swim_df = pd.read_csv(swimming_csv, names=col_names, skiprows=1).fillna("")
+
+        student_col = 'Student'
+        ability_col = 'Swimming Ability'
 
         print(f"\n{'='*80}")
         print("SWIMMING ABILITY MATCHING")
         print(f"{'='*80}")
-        print(f"Columns : {list(swim_df.columns)}")
-        print(f"Rows (after dedup): {len(swim_df)}")
+        print(f"Columns: {list(swim_df.columns)}")
+        print(f"Total rows: {len(swim_df)}")
 
-        # Build parent-surname -> student_id lookup from contact CSV
-        parent_lookup = _build_parent_surname_lookup(contact_df)
-        using_contact = bool(parent_lookup)
-        print(f"Contact CSV available: {using_contact} ({len(parent_lookup)} parent surnames indexed)")
+        # Deduplicate by email, keep most recent
+        swim_df['_time'] = pd.to_datetime(swim_df['Submission Time'], errors='coerce')
+        has_email = swim_df[swim_df['Email'].str.strip() != ""]
+        no_email  = swim_df[swim_df['Email'].str.strip() == ""]
+        deduped = has_email.sort_values('_time', ascending=False).drop_duplicates(subset=['Email'], keep='first')
+        swim_df = pd.concat([deduped, no_email], ignore_index=True)
+        print(f"Rows after dedup: {len(swim_df)}")
 
-        # Build student surname -> student_id lookup (fallback)
-        student_surname_lookup = {}
+        # Identify duplicate student surnames in the main list
+        surname_counts = {}
         for _, row in df_main.iterrows():
-            sid   = str(row[COLS['student_id']])
-            sname = str(row[COLS['surname']]).strip().lower()
-            if sname:
-                student_surname_lookup.setdefault(sname, set()).add(sid)
+            s = str(row[COLS['surname']]).strip().lower()
+            if s:
+                surname_counts[s] = surname_counts.get(s, 0) + 1
+        duplicate_surnames = {s for s, c in surname_counts.items() if c > 1}
+        print(f"Duplicate surnames in student list: {len(duplicate_surnames)}")
 
-        # Identify duplicate student surnames (need extra care)
-        duplicate_student_surnames = {s for s, ids in student_surname_lookup.items() if len(ids) > 1}
+        matched = {}
+        unmatched = []
+        used_indices = set()
+        matched_count = 0
 
-        matched   = {}   # student_id -> ability
-        used_rows = set()
+        print(f"\n{'='*80}")
+        print("MATCHING PROCESS")
+        print(f"{'='*80}")
 
-        for swim_idx, swim_row in swim_df.iterrows():
-            p_surname = str(swim_row[col_surname]).strip().lower()
-            ability   = str(swim_row[ability_col]).strip()
+        for _, student_row in df_main.iterrows():
+            student_id     = str(student_row[COLS['student_id']])
+            first_name     = str(student_row[COLS['first_name']]).strip()
+            preferred_name = str(student_row.get('Preferred name', '')).strip()
+            surname        = str(student_row[COLS['surname']]).strip()
 
-            if not p_surname or not ability or ability.lower() in ('nan', 'submitted', ''):
+            if not surname:
                 continue
 
-            resolved_ids = set()
+            surname_lower = surname.lower()
+            first_lower   = first_name.lower()
+            pref_lower    = preferred_name.lower()
+            has_dup       = surname_lower in duplicate_surnames
 
-            # Tier 1: contact CSV parent surname lookup
-            if using_contact and p_surname in parent_lookup:
-                resolved_ids = parent_lookup[p_surname]
-                tier = "contact CSV"
-            # Tier 2: student own surname fallback
-            elif p_surname in student_surname_lookup:
-                resolved_ids = student_surname_lookup[p_surname]
-                tier = "student surname"
-            else:
-                tier = None
+            match_found = False
+            for swim_idx, swim_row in swim_df.iterrows():
+                if swim_idx in used_indices:
+                    continue
 
-            if not resolved_ids:
-                continue
+                student_name_field = str(swim_row.get(student_col, '')).strip().lower()
+                ability = str(swim_row.get(ability_col, '')).strip()
 
-            # If multiple students resolve to this surname, assign to all
-            # (siblings will share a parent entry; both need the data recorded,
-            #  and the manual UI can correct any errors)
-            for sid in resolved_ids:
-                if sid not in matched:
-                    matched[sid] = ability
-                    used_rows.add(swim_idx)
-                    print(f"  ✓ {p_surname} → student {sid} via {tier}: {ability}")
+                if not ability or ability.lower() in ('nan', 'submitted', ''):
+                    continue
+
+                surname_pattern = r'\b' + re.escape(surname_lower) + r'\b'
+
+                if not has_dup:
+                    if re.search(surname_pattern, student_name_field):
+                        matched[student_id] = ability
+                        used_indices.add(swim_idx)
+                        match_found = True
+                        matched_count += 1
+                        if matched_count <= 5:
+                            print(f"[{matched_count}] ✓ {surname}, {first_name} → '{swim_row[student_col]}' : {ability}")
+                        break
+                else:
+                    surname_match = re.search(surname_pattern, student_name_field)
+                    first_match   = re.search(r'\b' + re.escape(first_lower) + r'\b', student_name_field) if first_lower else None
+                    pref_match    = re.search(r'\b' + re.escape(pref_lower)  + r'\b', student_name_field) if pref_lower  else None
+                    if surname_match and (first_match or pref_match):
+                        matched[student_id] = ability
+                        used_indices.add(swim_idx)
+                        match_found = True
+                        matched_count += 1
+                        if matched_count <= 5:
+                            print(f"[{matched_count}] ✓ {surname}, {first_name} → '{swim_row[student_col]}' : {ability}")
+                        break
+
+            if not match_found and matched_count <= 10:
+                print(f"[ ] ✗ {surname}, {first_name} (ID: {student_id}) — not found in swimming CSV")
 
         # Collect unmatched swimming rows for manual assignment
-        unmatched = []
         for swim_idx, swim_row in swim_df.iterrows():
-            if swim_idx not in used_rows:
-                p_name   = f"{str(swim_row[swim_df.columns[1]]).strip()} {str(swim_row[col_surname]).strip()}"
-                ability  = str(swim_row[ability_col]).strip()
-                if ability and ability.lower() not in ('nan', 'submitted', ''):
-                    unmatched.append({'student_name': p_name, 'ability': ability, 'index': swim_idx})
+            if swim_idx not in used_indices:
+                student_name = str(swim_row.get(student_col, '')).strip()
+                ability = str(swim_row.get(ability_col, '')).strip()
+                if student_name and ability and ability.lower() not in ('nan', 'submitted', ''):
+                    unmatched.append({'student_name': student_name, 'ability': ability, 'index': swim_idx})
 
         print(f"\n✓ Matched: {len(matched)}  ✗ Unmatched rows: {len(unmatched)}")
         print(f"{'='*80}\n")
@@ -708,86 +742,123 @@ def get_swimming_display_color(ability):
 
 def match_dietary_requirements(df_main, dietary_csv, contact_csv=None):
     """
-    Matches dietary requirements to students using a three-tier strategy:
+    Matches dietary requirements to students by searching for the student's surname
+    within the 'Student' column of the dietary CSV.
 
-    Tier 1 — Contact CSV parent surnames (SC1/SC2 Surname) linked to student IDs.
-             Handles mismatched parent/student surnames (blended families etc.).
-    Tier 2 — Student's own surname as a fallback.
-    Tier 3 — Unmatched: surfaced in the manual-assignment UI.
+    CSV format (7 cols, 6 headers — Email used as implicit index by pandas):
+      Email, First Name, Surname, Student, Submission Time, [Status], Dietary Requirements
 
-    CSV format: Email, First Name, Surname, Submission Time, Status, Dietary Requirements
+    Read with explicit column names to avoid the index-shift problem.
+
+    Strategy:
+    - Unique surname  → match if surname appears as a whole word in Student field
+    - Duplicate surnames → require surname + first/preferred name both present
+    - Deduplicates by email, keeping the most recent submission
     """
     try:
-        contact_df = st.session_state.get('contact_csv_df', None)
-        diet_df = _read_and_dedup_csv(dietary_csv)
+        if hasattr(dietary_csv, 'seek'):
+            dietary_csv.seek(0)
 
-        col_surname = diet_df.columns[2]
-        dietary_col = diet_df.columns[-1]
+        col_names = ['Email', 'First Name', 'Surname', 'Student', 'Submission Time', 'Status', 'Dietary Requirements']
+        dietary_df = pd.read_csv(dietary_csv, names=col_names, skiprows=1).fillna("")
+
+        student_col = 'Student'
+        dietary_col = 'Dietary Requirements'
 
         print(f"\n{'='*80}")
         print("DIETARY REQUIREMENTS MATCHING")
         print(f"{'='*80}")
-        print(f"Columns : {list(diet_df.columns)}")
-        print(f"Rows (after dedup): {len(diet_df)}")
+        print(f"Columns: {list(dietary_df.columns)}")
+        print(f"Total rows: {len(dietary_df)}")
 
-        # Build parent-surname -> student_id lookup from contact CSV
-        parent_lookup = _build_parent_surname_lookup(contact_df)
-        using_contact = bool(parent_lookup)
-        print(f"Contact CSV available: {using_contact} ({len(parent_lookup)} parent surnames indexed)")
+        # Deduplicate by email, keep most recent
+        dietary_df['_time'] = pd.to_datetime(dietary_df['Submission Time'], errors='coerce')
+        has_email = dietary_df[dietary_df['Email'].str.strip() != ""]
+        no_email  = dietary_df[dietary_df['Email'].str.strip() == ""]
+        deduped = has_email.sort_values('_time', ascending=False).drop_duplicates(subset=['Email'], keep='first')
+        dietary_df = pd.concat([deduped, no_email], ignore_index=True)
+        print(f"Rows after dedup: {len(dietary_df)}")
 
-        # Build student surname -> student_id lookup (fallback)
-        student_surname_lookup = {}
+        # Identify duplicate student surnames
+        surname_counts = {}
         for _, row in df_main.iterrows():
-            sid   = str(row[COLS['student_id']])
-            sname = str(row[COLS['surname']]).strip().lower()
-            if sname:
-                student_surname_lookup.setdefault(sname, set()).add(sid)
+            s = str(row[COLS['surname']]).strip().lower()
+            if s:
+                surname_counts[s] = surname_counts.get(s, 0) + 1
+        duplicate_surnames = {s for s, c in surname_counts.items() if c > 1}
+        print(f"Duplicate surnames in student list: {len(duplicate_surnames)}")
 
-        matched  = {}
-        used_rows = set()
-
-        for diet_idx, diet_row in diet_df.iterrows():
-            p_surname   = str(diet_row[col_surname]).strip().lower()
-            dietary_req = str(diet_row[dietary_col]).strip()
-
-            if not p_surname:
-                continue
-
-            # Normalise empty / N/A responses
-            if not dietary_req or dietary_req.lower() in ('nan', 'submitted', '', 'n/a'):
-                dietary_req = "No concerns listed"
-
-            resolved_ids = set()
-
-            # Tier 1: contact CSV parent surname lookup
-            if using_contact and p_surname in parent_lookup:
-                resolved_ids = parent_lookup[p_surname]
-                tier = "contact CSV"
-            # Tier 2: student own surname fallback
-            elif p_surname in student_surname_lookup:
-                resolved_ids = student_surname_lookup[p_surname]
-                tier = "student surname"
-            else:
-                tier = None
-
-            if not resolved_ids:
-                continue
-
-            for sid in resolved_ids:
-                if sid not in matched:
-                    matched[sid] = dietary_req
-                    used_rows.add(diet_idx)
-                    print(f"  ✓ {p_surname} → student {sid} via {tier}: {dietary_req[:60]}...")
-
-        # Collect unmatched rows for manual assignment
+        matched = {}
         unmatched = []
-        for diet_idx, diet_row in diet_df.iterrows():
-            if diet_idx not in used_rows:
-                p_name      = f"{str(diet_row[diet_df.columns[1]]).strip()} {str(diet_row[col_surname]).strip()}"
-                dietary_req = str(diet_row[dietary_col]).strip()
-                if not dietary_req or dietary_req.lower() in ('nan', 'submitted', '', 'n/a'):
+        used_indices = set()
+        matched_count = 0
+
+        print(f"\n{'='*80}")
+        print("MATCHING PROCESS")
+        print(f"{'='*80}")
+
+        for _, student_row in df_main.iterrows():
+            student_id     = str(student_row[COLS['student_id']])
+            first_name     = str(student_row[COLS['first_name']]).strip()
+            preferred_name = str(student_row.get('Preferred name', '')).strip()
+            surname        = str(student_row[COLS['surname']]).strip()
+
+            if not surname:
+                continue
+
+            surname_lower = surname.lower()
+            first_lower   = first_name.lower()
+            pref_lower    = preferred_name.lower()
+            has_dup       = surname_lower in duplicate_surnames
+
+            match_found = False
+            for diet_idx, diet_row in dietary_df.iterrows():
+                if diet_idx in used_indices:
+                    continue
+
+                student_name_field = str(diet_row.get(student_col, '')).strip().lower()
+                dietary_req = str(diet_row.get(dietary_col, '')).strip()
+
+                # Normalise empty / nil / N/A
+                if not dietary_req or dietary_req.lower() in ('nan', 'submitted', '', 'nil', 'n/a'):
                     dietary_req = "No concerns listed"
-                unmatched.append({'student_name': p_name, 'dietary_req': dietary_req, 'index': diet_idx})
+
+                surname_pattern = r'\b' + re.escape(surname_lower) + r'\b'
+
+                if not has_dup:
+                    if re.search(surname_pattern, student_name_field):
+                        matched[student_id] = dietary_req
+                        used_indices.add(diet_idx)
+                        match_found = True
+                        matched_count += 1
+                        if matched_count <= 5:
+                            print(f"[{matched_count}] ✓ {surname}, {first_name} → '{diet_row[student_col]}' : {dietary_req[:50]}...")
+                        break
+                else:
+                    surname_match = re.search(surname_pattern, student_name_field)
+                    first_match   = re.search(r'\b' + re.escape(first_lower) + r'\b', student_name_field) if first_lower else None
+                    pref_match    = re.search(r'\b' + re.escape(pref_lower)  + r'\b', student_name_field) if pref_lower  else None
+                    if surname_match and (first_match or pref_match):
+                        matched[student_id] = dietary_req
+                        used_indices.add(diet_idx)
+                        match_found = True
+                        matched_count += 1
+                        if matched_count <= 5:
+                            print(f"[{matched_count}] ✓ {surname}, {first_name} → '{diet_row[student_col]}' : {dietary_req[:50]}...")
+                        break
+
+            if not match_found and matched_count <= 10:
+                print(f"[ ] ✗ {surname}, {first_name} (ID: {student_id}) — not found in dietary CSV")
+
+        # Collect unmatched dietary rows for manual assignment
+        for diet_idx, diet_row in dietary_df.iterrows():
+            if diet_idx not in used_indices:
+                student_name = str(diet_row.get(student_col, '')).strip()
+                dietary_req  = str(diet_row.get(dietary_col, '')).strip()
+                if not dietary_req or dietary_req.lower() in ('nan', 'submitted', '', 'nil', 'n/a'):
+                    dietary_req = "No concerns listed"
+                if student_name:
+                    unmatched.append({'student_name': student_name, 'dietary_req': dietary_req, 'index': diet_idx})
 
         print(f"\n✓ Matched: {len(matched)}  ✗ Unmatched rows: {len(unmatched)}")
         print(f"{'='*80}\n")
@@ -803,19 +874,22 @@ def match_photo_permissions(df_main, photo_perm_csv):
     """
     Matches photo permission responses to students using a three-tier strategy:
 
-    Tier 1 — Contact CSV parent surnames (SC1/SC2 Surname) linked to student IDs.
-             Handles mismatched parent/student surnames (blended families etc.).
-    Tier 2 — Student's own surname as a fallback.
-    Tier 3 — No match found → 'No Response'.
+    Tier 1 — Emergency contacts from the student list CSV.
+             Matches the parent's full name (First Name + Surname from the
+             permissions CSV) against names parsed from each student's
+             Emergency Notes field. Works with no optional files uploaded.
+    Tier 2 — Contact CSV SC1/SC2 Surname lookup (if Attendance CSV uploaded).
+    Tier 3 — Student's own surname as a last-resort fallback.
 
     A student is 'Yes' only if BOTH questions are answered 'Yes'.
-    Any 'No' answer → 'No'. No match → 'No Response'.
+    Any 'No' answer → 'No'. No match found → 'No Response'.
 
     CSV format: Email, First Name, Surname, Submission Time, Status, Q1, Q2
     """
     try:
         df = _read_and_dedup_csv(photo_perm_csv)
 
+        col_first   = df.columns[1]
         col_surname = df.columns[2]
         q_cols      = [df.columns[-2], df.columns[-1]]
 
@@ -827,20 +901,34 @@ def match_photo_permissions(df_main, photo_perm_csv):
         print(f"  Q1: '{q_cols[0]}'")
         print(f"  Q2: '{q_cols[1]}'")
 
-        # Build parent-surname -> permission row lookup
-        perm_by_surname = {}
+        # ── Build permission lookup: parent full name (lower) -> result ──────
+        # Key is "firstname surname" to maximise specificity
+        perm_by_fullname = {}   # "jessica gray" -> result
+        perm_by_surname  = {}   # "gray"         -> result (fallback)
         for _, row in df.iterrows():
-            sname = str(row[col_surname]).strip().lower()
-            if sname:
-                perm_by_surname.setdefault(sname, []).append(row)
+            p_first   = str(row[col_first]).strip().lower()
+            p_surname = str(row[col_surname]).strip().lower()
+            q1 = str(row[q_cols[0]]).strip().lower()
+            q2 = str(row[q_cols[1]]).strip().lower()
+            result = 'Yes' if (q1 == 'yes' and q2 == 'yes') else 'No'
 
-        # Build parent-surname -> student_id lookup from contact CSV (Tier 1)
-        contact_df = st.session_state.get('contact_csv_df', None)
-        parent_lookup = _build_parent_surname_lookup(contact_df)
+            if p_first and p_surname:
+                full = f"{p_first} {p_surname}"
+                # Never downgrade an existing 'No' result for same parent
+                if full not in perm_by_fullname or result == 'No':
+                    perm_by_fullname[full] = result
+            if p_surname:
+                if p_surname not in perm_by_surname or result == 'No':
+                    perm_by_surname[p_surname] = result
+
+        # ── Tier 2 prep: SC1/SC2 surname lookup from contact CSV ─────────────
+        contact_df    = st.session_state.get('contact_csv_df', None)
+        parent_lookup = _build_parent_surname_lookup(contact_df)   # surname -> {sid,...}
         using_contact = bool(parent_lookup)
-        print(f"Contact CSV available: {using_contact} ({len(parent_lookup)} parent surnames indexed)")
+        print(f"Emergency contacts: always active")
+        print(f"Contact CSV (SC1/SC2): {using_contact} ({len(parent_lookup)} surnames indexed)")
 
-        # Build student surname -> student_id lookup (Tier 2 fallback)
+        # ── Tier 3 prep: student own-surname lookup ───────────────────────────
         student_surname_lookup = {}
         for _, row in df_main.iterrows():
             sid   = str(row[COLS['student_id']])
@@ -848,29 +936,61 @@ def match_photo_permissions(df_main, photo_perm_csv):
             if sname:
                 student_surname_lookup.setdefault(sname, set()).add(sid)
 
-        # Assign a permission result to each student
+        # ── Start every student as No Response ───────────────────────────────
         permissions = {str(row[COLS['student_id']]): 'No Response' for _, row in df_main.iterrows()}
 
-        for perm_surname, rows in perm_by_surname.items():
-            perm_row = rows[0]   # already deduped — one row per email/family
-            q1 = str(perm_row[q_cols[0]]).strip().lower()
-            q2 = str(perm_row[q_cols[1]]).strip().lower()
-            result = 'Yes' if (q1 == 'yes' and q2 == 'yes') else 'No'
+        print(f"\n{'='*80}")
+        print("MATCHING PROCESS")
+        print(f"{'='*80}")
 
-            # Resolve which student IDs this parent surname maps to
-            resolved_ids = set()
-            if using_contact and perm_surname in parent_lookup:
-                resolved_ids = parent_lookup[perm_surname]
-                tier = "contact CSV"
-            elif perm_surname in student_surname_lookup:
-                resolved_ids = student_surname_lookup[perm_surname]
-                tier = "student surname"
+        for _, student_row in df_main.iterrows():
+            sid = str(student_row[COLS['student_id']])
 
-            for sid in resolved_ids:
-                # Only upgrade from No Response; never downgrade a 'No' to 'Yes'
-                if permissions.get(sid) == 'No Response' or result == 'No':
-                    permissions[sid] = result
-                    print(f"  {result:3s} ← {perm_surname} → student {sid} via {tier}")
+            # ── Tier 1: match parent full name against emergency contacts ─────
+            emerg_text   = str(student_row.get(COLS['emergency_notes'], '')).strip()
+            emerg_names  = parse_emergency_contact_names(emerg_text)  # ["jessica gray", ...]
+            matched_result = None
+            matched_tier   = None
+
+            for emerg_name in emerg_names:
+                # Try exact full-name match first
+                if emerg_name in perm_by_fullname:
+                    matched_result = perm_by_fullname[emerg_name]
+                    matched_tier   = f"emergency contact full name '{emerg_name}'"
+                    break
+                # Try surname-only within the emergency contact name
+                parts = emerg_name.split()
+                if parts:
+                    emerg_surname = parts[-1]   # last word is typically the surname
+                    if emerg_surname in perm_by_fullname or emerg_surname in perm_by_surname:
+                        candidate = perm_by_fullname.get(emerg_surname) or perm_by_surname.get(emerg_surname)
+                        matched_result = candidate
+                        matched_tier   = f"emergency contact surname '{emerg_surname}'"
+                        break
+
+            # ── Tier 2: Contact CSV SC1/SC2 surname ──────────────────────────
+            if matched_result is None and using_contact:
+                # Find this student's SC1/SC2 surnames via the contact lookup
+                for p_surname, candidate_result in perm_by_surname.items():
+                    if sid in parent_lookup.get(p_surname, set()):
+                        matched_result = candidate_result
+                        matched_tier   = f"contact CSV surname '{p_surname}'"
+                        break
+
+            # ── Tier 3: student's own surname ────────────────────────────────
+            if matched_result is None:
+                s_surname = str(student_row[COLS['surname']]).strip().lower()
+                if s_surname in perm_by_surname:
+                    matched_result = perm_by_surname[s_surname]
+                    matched_tier   = f"student surname '{s_surname}'"
+
+            # Apply result — a 'No' always wins over an existing value
+            if matched_result is not None:
+                if permissions[sid] == 'No Response' or matched_result == 'No':
+                    permissions[sid] = matched_result
+                    print(f"  {matched_result:3s} ← student {sid} via {matched_tier}")
+            else:
+                print(f"  --- ← student {sid} — no match found (No Response)")
 
         yes_count = sum(1 for v in permissions.values() if v == 'Yes')
         no_count  = sum(1 for v in permissions.values() if v == 'No')
@@ -884,7 +1004,6 @@ def match_photo_permissions(df_main, photo_perm_csv):
         print(f"Error processing photo permissions CSV: {e}")
         print(traceback.format_exc())
         return {}
-
 
 def get_swimming_display_color(ability):
     """
