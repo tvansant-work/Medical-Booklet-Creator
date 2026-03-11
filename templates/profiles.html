@@ -107,7 +107,7 @@
     /* NO-PERMISSION GRID */
     .no-perm-grid { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
     .no-perm-item { width: 18%; text-align: center; }
-    .no-perm-img  { width: 100%; height: 90px; object-fit: contain; border: 1px solid #f44336; margin-bottom: 4px; }
+    .no-perm-img  { width: 100%; height: 90px; object-fit: contain; border: none; margin-bottom: 4px; }
     .no-perm-name { font-size: 9pt; font-weight: bold; line-height: 1.2; }
     .no-perm-badge { font-size: 8pt; font-weight: bold; padding: 1px 5px; border-radius: 3px; display: inline-block; margin-top: 2px; }
     .no-perm-badge-no { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
@@ -206,7 +206,7 @@
             {% if s.photo %}
                 <img class="no-perm-img" src="data:image/jpeg;base64,{{ s.photo }}">
             {% else %}
-                <div class="no-perm-img" style="display:flex;align-items:center;justify-content:center;color:#ccc;font-size:9px;border:1px dashed #ccc;">NO PHOTO</div>
+                <div class="no-perm-img" style="display:flex;align-items:center;justify-content:center;color:#ccc;font-size:9px;">NO PHOTO</div>
             {% endif %}
             <div class="no-perm-name">{{ s.first }}<br>{{ s.last }}</div>
             {% if s.photo_perm == 'No' %}
