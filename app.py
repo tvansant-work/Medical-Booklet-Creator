@@ -2574,7 +2574,8 @@ with t2:
                     date=datetime.now().strftime("%d %B %Y"),
                     students=s_list, matrix=m_list, medical_full=med_list,
                     no_perm_list=no_perm_list,
-                    options=display_opts, mode="full"
+                    options=display_opts, mode="full",
+                    student_count=len(s_list)
                 )
                 return HTML(string=full_html).write_pdf()
 

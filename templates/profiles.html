@@ -5,6 +5,7 @@
 <style>
     @page { size: A4; margin: 15mm 15mm; }
     body { font-family: Helvetica, Arial, sans-serif; font-size: 9pt; color: #333; }
+
     
     .page-break { page-break-after: always; }
     .no-break { page-break-inside: avoid; }
@@ -15,27 +16,27 @@
     .conf { color: #c62828; font-weight: bold; margin-top: 20px; text-transform: uppercase; letter-spacing: 1px; }
 
     /* PHOTO GRID (5 per row) */
-    .photo-grid { display: flex; flex-wrap: wrap; gap: 4px; justify-content: flex-start; margin-top: 4px; }
-    .grid-item { width: calc(16.666% - 4px); padding: 0; text-align: center; margin-bottom: 0; }
+    .photo-grid { display: flex; flex-wrap: wrap; gap: var(--grid-gap); justify-content: flex-start; margin-top: 4px; }
+    .grid-item { width: var(--grid-item-w); padding: 0; text-align: center; margin-bottom: 0; }
     .grid-item:hover { cursor: pointer; opacity: 0.8; }
-    .grid-img { width: 100%; height: 110px; object-fit: cover; display: block; margin-bottom: 2px; }
-    .grid-name { font-size: 7pt; font-weight: bold; line-height: 1.15; color: #000; margin-bottom: 3px; }
+    .grid-img { width: 100%; height: var(--grid-img-h); object-fit: cover; display: block; margin-bottom: 2px; }
+    .grid-name { font-size: var(--grid-name-sz); font-weight: bold; line-height: 1.15; color: #000; margin-bottom: 3px; }
 
     /* TABLES */
-    .matrix-table, .summary-table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-bottom: 12px; }
-    .matrix-table th, .summary-table th { background: #eee; border: 1px solid #999; padding: 3px 5px; text-align: left; font-size: 7.5pt; }
+    .matrix-table, .summary-table { width: 100%; border-collapse: collapse; font-size: var(--tbl-font); margin-bottom: var(--tbl-margin); }
+    .matrix-table th, .summary-table th { background: #eee; border: 1px solid #999; padding: var(--tbl-pad); text-align: left; font-size: var(--tbl-hdr-font); }
     .summary-table th { background: #333; color: white; }
-    .matrix-table td, .summary-table td { border: 1px solid #ccc; padding: 3px 5px; vertical-align: top; }
+    .matrix-table td, .summary-table td { border: 1px solid #ccc; padding: var(--tbl-pad); vertical-align: top; }
     .matrix-table td.center { text-align: center; }
     
     .check-mark { font-weight: bold; color: #333; }
     .red-cross { font-weight: 900; color: #D32F2F; font-size: 10pt; }
-    .summary-list { margin: 0; padding-left: 14px; font-size: 8pt; }
-    .summary-list li { margin-bottom: 3px; }
-    .sum-sev-severe   { font-size: 7pt; text-transform: uppercase; color: #d32f2f; font-weight: bold; margin-left: 4px; }
-    .sum-sev-moderate { font-size: 7pt; text-transform: uppercase; color: #e65100; font-weight: bold; margin-left: 4px; }
-    .sum-sev-mild     { font-size: 7pt; text-transform: uppercase; color: #f9a825; font-weight: bold; margin-left: 4px; }
-    .sum-desc { display: block; font-size: 7pt; color: #555; margin-top: 1px; font-style: italic; }
+    .summary-list { margin: 0; padding-left: 14px; font-size: var(--sum-list-font); }
+    .summary-list li { margin-bottom: var(--sum-li-gap); }
+    .sum-sev-severe   { font-size: var(--sum-sev-font); text-transform: uppercase; color: #d32f2f; font-weight: bold; margin-left: 4px; }
+    .sum-sev-moderate { font-size: var(--sum-sev-font); text-transform: uppercase; color: #e65100; font-weight: bold; margin-left: 4px; }
+    .sum-sev-mild     { font-size: var(--sum-sev-font); text-transform: uppercase; color: #f9a825; font-weight: bold; margin-left: 4px; }
+    .sum-desc { display: block; font-size: var(--sum-desc-font); color: #555; margin-top: 1px; font-style: italic; }
 
     /* PROFILE */
     .profile { position: relative; min-height: 95vh; padding-bottom: 30px; }
@@ -92,9 +93,9 @@
     .footer { position: absolute; bottom: 0; left: 0; right: 0; text-align: right; font-size: 8pt; color: #aaa; padding-top: 10px; border-top: 1px solid #eee; }
 
     /* DIETARY REQUIREMENTS TABLE */
-    .dietary-table { width: 100%; border-collapse: collapse; font-size: 8pt; margin-bottom: 8px; }
-    .dietary-table th { background: #4caf50; color: white; border: 1px solid #388e3c; padding: 4px 6px; text-align: left; font-size: 8pt; }
-    .dietary-table td { border: 1px solid #ccc; padding: 4px 6px; vertical-align: top; }
+    .dietary-table { width: 100%; border-collapse: collapse; font-size: var(--tbl-font); margin-bottom: var(--tbl-margin); }
+    .dietary-table th { background: #4caf50; color: white; border: 1px solid #388e3c; padding: var(--tbl-pad); text-align: left; font-size: var(--tbl-hdr-font); }
+    .dietary-table td { border: 1px solid #ccc; padding: var(--tbl-pad); vertical-align: top; }
     .dietary-table td.student-name { font-weight: bold; width: 25%; }
     .dietary-table td.dietary-req { font-size: 9.5pt; line-height: 1.4; }
     .dietary-no-data { color: #333; font-weight: bold; }  /* No data given - bold */
@@ -109,8 +110,8 @@
     /* NO-PERMISSION GRID */
     .no-perm-grid { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 10px; }
     .no-perm-item { width: 18%; text-align: center; }
-    .no-perm-img  { width: 100%; height: 90px; object-fit: contain; border: none; margin-bottom: 4px; }
-    .no-perm-name { font-size: 9pt; font-weight: bold; line-height: 1.2; }
+    .no-perm-img  { width: 100%; height: var(--perm-img-h); object-fit: contain; border: none; margin-bottom: 4px; }
+    .no-perm-name { font-size: var(--perm-name-sz); font-weight: bold; line-height: 1.2; }
     .no-perm-badge { font-size: 8pt; font-weight: bold; padding: 1px 5px; border-radius: 3px; display: inline-block; margin-top: 2px; }
     .no-perm-badge-no { background: #ffebee; color: #c62828; border: 1px solid #ef9a9a; }
     .no-perm-badge-nr { background: #fff3e0; color: #e65100; border: 1px solid #ffb74d; }
@@ -143,6 +144,62 @@
 </style>
 </head>
 <body>
+
+{%- set n = student_count | default(35) -%}
+<style>
+{% if n < 20 %}
+:root {
+    --grid-item-w:   calc(25% - 5px);
+    --grid-gap:      5px;
+    --grid-img-h:    224px;
+    --grid-name-sz:  9pt;
+    --tbl-font:      10pt;
+    --tbl-hdr-font:  9.5pt;
+    --tbl-pad:       5px 8px;
+    --tbl-margin:    16px;
+    --sum-list-font: 10pt;
+    --sum-sev-font:  8.5pt;
+    --sum-desc-font: 8.5pt;
+    --sum-li-gap:    5px;
+    --perm-img-h:    120px;
+    --perm-name-sz:  10pt;
+}
+{% elif n <= 30 %}
+:root {
+    --grid-item-w:   calc(20% - 4px);
+    --grid-gap:      4px;
+    --grid-img-h:    175px;
+    --grid-name-sz:  7.5pt;
+    --tbl-font:      8pt;
+    --tbl-hdr-font:  7.5pt;
+    --tbl-pad:       3px 5px;
+    --tbl-margin:    10px;
+    --sum-list-font: 8pt;
+    --sum-sev-font:  7pt;
+    --sum-desc-font: 7pt;
+    --sum-li-gap:    3px;
+    --perm-img-h:    90px;
+    --perm-name-sz:  8.5pt;
+}
+{% else %}
+:root {
+    --grid-item-w:   calc(16.666% - 4px);
+    --grid-gap:      4px;
+    --grid-img-h:    110px;
+    --grid-name-sz:  7pt;
+    --tbl-font:      8pt;
+    --tbl-hdr-font:  7.5pt;
+    --tbl-pad:       3px 5px;
+    --tbl-margin:    12px;
+    --sum-list-font: 8pt;
+    --sum-sev-font:  7pt;
+    --sum-desc-font: 7pt;
+    --sum-li-gap:    3px;
+    --perm-img-h:    90px;
+    --perm-name-sz:  9pt;
+}
+{% endif %}
+</style>
 
     <div class="cover">
         <h1>{{ title }}</h1>
@@ -191,7 +248,7 @@
             {% endfor %}
         </tbody>
     </table>
-    <div class="page-break"></div>
+    {% if n >= 30 %}<div class="page-break"></div>{% endif %}
     {% endif %}
 
     {% if options.photo_perm and no_perm_list %}
@@ -221,7 +278,7 @@
         {% endfor %}
     </div>
     </div>
-    <div class="page-break"></div>
+    {% if n >= 30 %}<div class="page-break"></div>{% endif %}
     {% endif %}
 
     <h3>Quick Medical Overview</h3>
@@ -249,7 +306,7 @@
             {% endfor %}
         </tbody>
     </table>
-    <div class="page-break"></div>
+    {% if n >= 30 %}<div class="page-break"></div>{% endif %}
 
     <h3>Medical Condition Summary</h3>
     <table class="summary-table">
