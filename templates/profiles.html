@@ -1,3 +1,50 @@
+{%- set n = student_count | default(35) -%}
+{%- if n < 20 -%}
+  {%- set grid_item_w   = "calc(25% - 5px)" -%}
+  {%- set grid_gap      = "5px" -%}
+  {%- set grid_img_h    = "160px" -%}
+  {%- set grid_name_sz  = "9pt" -%}
+  {%- set tbl_font      = "10pt" -%}
+  {%- set tbl_hdr_font  = "9.5pt" -%}
+  {%- set tbl_pad       = "5px 8px" -%}
+  {%- set tbl_margin    = "16px" -%}
+  {%- set sum_list_font = "10pt" -%}
+  {%- set sum_sev_font  = "8.5pt" -%}
+  {%- set sum_desc_font = "8.5pt" -%}
+  {%- set sum_li_gap    = "5px" -%}
+  {%- set perm_img_h    = "120px" -%}
+  {%- set perm_name_sz  = "10pt" -%}
+{%- elif n <= 30 -%}
+  {%- set grid_item_w   = "calc(20% - 4px)" -%}
+  {%- set grid_gap      = "4px" -%}
+  {%- set grid_img_h    = "160px" -%}
+  {%- set grid_name_sz  = "7.5pt" -%}
+  {%- set tbl_font      = "8pt" -%}
+  {%- set tbl_hdr_font  = "7.5pt" -%}
+  {%- set tbl_pad       = "3px 5px" -%}
+  {%- set tbl_margin    = "10px" -%}
+  {%- set sum_list_font = "8pt" -%}
+  {%- set sum_sev_font  = "7pt" -%}
+  {%- set sum_desc_font = "7pt" -%}
+  {%- set sum_li_gap    = "3px" -%}
+  {%- set perm_img_h    = "90px" -%}
+  {%- set perm_name_sz  = "8.5pt" -%}
+{%- else -%}
+  {%- set grid_item_w   = "calc(16.666% - 4px)" -%}
+  {%- set grid_gap      = "4px" -%}
+  {%- set grid_img_h    = "110px" -%}
+  {%- set grid_name_sz  = "7pt" -%}
+  {%- set tbl_font      = "8pt" -%}
+  {%- set tbl_hdr_font  = "7.5pt" -%}
+  {%- set tbl_pad       = "3px 5px" -%}
+  {%- set tbl_margin    = "12px" -%}
+  {%- set sum_list_font = "8pt" -%}
+  {%- set sum_sev_font  = "7pt" -%}
+  {%- set sum_desc_font = "7pt" -%}
+  {%- set sum_li_gap    = "3px" -%}
+  {%- set perm_img_h    = "90px" -%}
+  {%- set perm_name_sz  = "9pt" -%}
+{%- endif -%}
 <!DOCTYPE html>
 <html>
 <head>
@@ -5,6 +52,23 @@
 <style>
     @page { size: A4; margin: 15mm 15mm; }
     body { font-family: Helvetica, Arial, sans-serif; font-size: 9pt; color: #333; }
+
+    :root {
+        --grid-item-w:   {{ grid_item_w }};
+        --grid-gap:      {{ grid_gap }};
+        --grid-img-h:    {{ grid_img_h }};
+        --grid-name-sz:  {{ grid_name_sz }};
+        --tbl-font:      {{ tbl_font }};
+        --tbl-hdr-font:  {{ tbl_hdr_font }};
+        --tbl-pad:       {{ tbl_pad }};
+        --tbl-margin:    {{ tbl_margin }};
+        --sum-list-font: {{ sum_list_font }};
+        --sum-sev-font:  {{ sum_sev_font }};
+        --sum-desc-font: {{ sum_desc_font }};
+        --sum-li-gap:    {{ sum_li_gap }};
+        --perm-img-h:    {{ perm_img_h }};
+        --perm-name-sz:  {{ perm_name_sz }};
+    }
 
     
     .page-break { page-break-after: always; }
@@ -145,62 +209,6 @@
 </head>
 <body>
 
-{%- set n = student_count | default(35) -%}
-<style>
-{% if n < 20 %}
-:root {
-    --grid-item-w:   calc(25% - 5px);
-    --grid-gap:      5px;
-    --grid-img-h:    224px;
-    --grid-name-sz:  9pt;
-    --tbl-font:      10pt;
-    --tbl-hdr-font:  9.5pt;
-    --tbl-pad:       5px 8px;
-    --tbl-margin:    16px;
-    --sum-list-font: 10pt;
-    --sum-sev-font:  8.5pt;
-    --sum-desc-font: 8.5pt;
-    --sum-li-gap:    5px;
-    --perm-img-h:    120px;
-    --perm-name-sz:  10pt;
-}
-{% elif n <= 30 %}
-:root {
-    --grid-item-w:   calc(20% - 4px);
-    --grid-gap:      4px;
-    --grid-img-h:    175px;
-    --grid-name-sz:  7.5pt;
-    --tbl-font:      8pt;
-    --tbl-hdr-font:  7.5pt;
-    --tbl-pad:       3px 5px;
-    --tbl-margin:    10px;
-    --sum-list-font: 8pt;
-    --sum-sev-font:  7pt;
-    --sum-desc-font: 7pt;
-    --sum-li-gap:    3px;
-    --perm-img-h:    90px;
-    --perm-name-sz:  8.5pt;
-}
-{% else %}
-:root {
-    --grid-item-w:   calc(16.666% - 4px);
-    --grid-gap:      4px;
-    --grid-img-h:    110px;
-    --grid-name-sz:  7pt;
-    --tbl-font:      8pt;
-    --tbl-hdr-font:  7.5pt;
-    --tbl-pad:       3px 5px;
-    --tbl-margin:    12px;
-    --sum-list-font: 8pt;
-    --sum-sev-font:  7pt;
-    --sum-desc-font: 7pt;
-    --sum-li-gap:    3px;
-    --perm-img-h:    90px;
-    --perm-name-sz:  9pt;
-}
-{% endif %}
-</style>
-
     <div class="cover">
         <h1>{{ title }}</h1>
         <p>Generated {{ date }}</p>
@@ -248,7 +256,7 @@
             {% endfor %}
         </tbody>
     </table>
-    {% if n >= 30 %}<div class="page-break"></div>{% endif %}
+    <div class="page-break"></div>
     {% endif %}
 
     {% if options.photo_perm and no_perm_list %}
@@ -278,7 +286,7 @@
         {% endfor %}
     </div>
     </div>
-    {% if n >= 30 %}<div class="page-break"></div>{% endif %}
+    <div class="page-break"></div>
     {% endif %}
 
     <h3>Quick Medical Overview</h3>
@@ -306,7 +314,7 @@
             {% endfor %}
         </tbody>
     </table>
-    {% if n >= 30 %}<div class="page-break"></div>{% endif %}
+    <div class="page-break"></div>
 
     <h3>Medical Condition Summary</h3>
     <table class="summary-table">
