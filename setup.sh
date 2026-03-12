@@ -73,6 +73,19 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────
+# PRE-STEP: AUTO-ACCEPT CHANNEL ToS
+# Newer conda versions prompt for Terms of Service
+# for certain channels. Set this once so no
+# interactive prompt appears during setup.
+# ─────────────────────────────────────────────
+
+if [ "$INSTALL_METHOD" = "conda" ]; then
+    "$CONDA_EXE" config --set auto_accept_tos yes 2>/dev/null || true
+fi
+
+echo ""
+
+# ─────────────────────────────────────────────
 # STEP 2: CREATE PYTHON ENVIRONMENT + INSTALL
 # LIBRARIES AND PACKAGES TOGETHER
 #

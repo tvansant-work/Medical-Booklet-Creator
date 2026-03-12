@@ -32,7 +32,9 @@
     .red-cross { font-weight: 900; color: #D32F2F; font-size: 14pt; }
     .summary-list { margin: 0; padding-left: 20px; font-size: 10pt; }
     .summary-list li { margin-bottom: 6px; }
-    .sum-sev { font-size: 8pt; text-transform: uppercase; color: #d32f2f; font-weight: bold; margin-left: 5px; }
+    .sum-sev-severe   { font-size: 8pt; text-transform: uppercase; color: #d32f2f; font-weight: bold; margin-left: 5px; }
+    .sum-sev-moderate { font-size: 8pt; text-transform: uppercase; color: #e65100; font-weight: bold; margin-left: 5px; }
+    .sum-sev-mild     { font-size: 8pt; text-transform: uppercase; color: #f9a825; font-weight: bold; margin-left: 5px; }
     .sum-desc { display: block; font-size: 8.5pt; color: #555; margin-top: 2px; font-style: italic; }
 
     /* PROFILE */
@@ -266,7 +268,13 @@
                     {% for cond in item.conditions %}
                         <li>
                             <strong>{{ cond.name }}</strong>
-                            <span class="sum-sev">({{ cond.severity }})</span>
+                            {% if cond.severity|lower == 'severe' %}
+                                <span class="sum-sev-severe">({{ cond.severity }})</span>
+                            {% elif cond.severity|lower == 'moderate' %}
+                                <span class="sum-sev-moderate">({{ cond.severity }})</span>
+                            {% else %}
+                                <span class="sum-sev-mild">({{ cond.severity }})</span>
+                            {% endif %}
                             <span class="sum-desc">{{ cond.description }}</span>
                         </li>
                     {% endfor %}

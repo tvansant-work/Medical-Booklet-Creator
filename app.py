@@ -158,18 +158,33 @@ def convert_file_to_images(file_obj):
         is_jpg = file_bytes[:3] == b'\xff\xd8\xff'
         name_says_pdf = fname.lower().endswith('.pdf')
 
+        # Attachment compression settings:
+        # 150 DPI and JPEG quality 72 give a good size/quality balance for
+        # action plan documents. Max dimension cap prevents oversized scans
+        # from inflating the PDF further.
+        ATTACH_DPI     = 150
+        ATTACH_QUALITY = 72
+        ATTACH_MAX_PX  = 2000  # longest edge cap in pixels
+
+        def _compress_img(im):
+            """Resize if oversized, then return compressed JPEG bytes."""
+            im = im.convert("RGB")
+            w, h = im.size
+            if max(w, h) > ATTACH_MAX_PX:
+                scale = ATTACH_MAX_PX / max(w, h)
+                im = im.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
+            buf = BytesIO()
+            im.save(buf, format="JPEG", quality=ATTACH_QUALITY, optimize=True)
+            return base64.b64encode(buf.getvalue()).decode()
+
         if is_pdf or (name_says_pdf and not is_png and not is_jpg):
             with pdfplumber.open(file_buffer) as pdf:
                 for page in pdf.pages:
-                    im = page.to_image(resolution=200).original.convert("RGB")
-                    buf = BytesIO()
-                    im.save(buf, format="JPEG", quality=90)
-                    images_b64.append(base64.b64encode(buf.getvalue()).decode())
+                    im = page.to_image(resolution=ATTACH_DPI).original
+                    images_b64.append(_compress_img(im))
         else:
-            img = Image.open(file_buffer).convert("RGB")
-            buf = BytesIO()
-            img.save(buf, format="JPEG", quality=90)
-            images_b64.append(base64.b64encode(buf.getvalue()).decode())
+            img = Image.open(file_buffer)
+            images_b64.append(_compress_img(img))
 
 
     except Exception as e:
