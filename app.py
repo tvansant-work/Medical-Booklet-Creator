@@ -49,6 +49,8 @@ if 'dietary_manual_selections' not in st.session_state:
     st.session_state.dietary_manual_selections = {} # Stores { 'dietary_idx': 'student_id' }
 if 'photo_permissions_map' not in st.session_state:
     st.session_state.photo_permissions_map = {} # Stores { 'student_id': 'Yes'|'No'|'No Response' }
+if 'excursion_contact_map' not in st.session_state:
+    st.session_state.excursion_contact_map = {} # Stores { 'student_id': parsed home contact dict }
 import pandas as pd
 import zipfile
 import yaml
@@ -526,6 +528,270 @@ def parse_home_contacts(row):
         # If anything goes wrong, return empty structure
         print(f"Error parsing home contacts: {e}")
         return {"contacts": [], "home_address": "", "home_phone": ""}
+
+def parse_excursion_pdf(pdf_file, df_main):
+    """
+    Parses the school 'Excursion contact & medical info' PDF.
+
+    Each student entry has this layout (pdfplumber extracts as text lines):
+      - Student name line: "Smith, Thomas (Tom)"  — surname, first (preferred)
+      - DOB line:          "25/03/08"
+      - Contacts block, repeating per household contact:
+          Line 1: home address  e.g. "555 Oceana Drive SORELL TAS 7171"
+          Line 2: "Home:  Mobile:"  (may have numbers inline)
+          Line 3: "<Relationship> <First> <Last>   Mobile: 0401 111 222"
+          Line 4: "Home: <num>  Work: <num>"   (may be blank / partial)
+          … repeats for 2nd household contact …
+      - Medical info section (ignored — already in student CSV)
+
+    Returns: { student_id: {
+        "home_address": str,
+        "home_phone":   str,
+        "contacts": [ {"name": str, "relation": str, "phone": {...}} ]
+    } }
+    """
+    if pdf_file is None:
+        return {}
+
+    # ── Build lookup: normalised_surname -> [{sid, first, preferred}] ──────────
+    surname_lookup = {}   # lower_no_spaces -> list of student dicts
+    for _, row in df_main.iterrows():
+        sid  = str(row[COLS['student_id']])
+        last = str(row[COLS['surname']]).strip()
+        first = str(row[COLS['first_name']]).strip()
+        pref  = str(row.get('Preferred name', '')).strip()
+        key = re.sub(r'[\s\-\']', '', last).lower()
+        surname_lookup.setdefault(key, []).append({
+            'sid': sid, 'last': last.lower(),
+            'first': first.lower(), 'pref': pref.lower()
+        })
+
+    results = {}
+    parse_errors = []
+
+    # Relationship words that can appear at the start of a contact line
+    RELATIONSHIP_WORDS = {
+        'mother', 'father', 'mum', 'dad', 'parent',
+        'guardian', 'aunt', 'uncle', 'grandparent', 'grandmother',
+        'grandfather', 'nana', 'pop', 'carer', 'stepmother',
+        'stepfather', 'stepmum', 'stepdad', 'sibling', 'sister',
+        'brother', 'emergency', 'contact',
+    }
+
+    def _looks_like_address(line):
+        """True if the line looks like a street address (has digits + a suburb-ish word)."""
+        return bool(re.search(r'\d', line)) and len(line) > 10
+
+    def _looks_like_home_mobile_header(line):
+        """True for lines like 'Home:  Mobile:' or 'Home: 03 6262 1111  Mobile:'."""
+        return bool(re.match(r'(?i)home\s*:', line))
+
+    def _extract_phone(text):
+        """Return (display, tel_link) from a text fragment, or (None, None)."""
+        m = re.search(r'(\(?\d[\d\s\-\(\)]{6,}\d)', text)
+        if m:
+            display = m.group(1).strip()
+            clean = re.sub(r'[^\d+]', '', display)
+            return display, f"tel:{clean}"
+        return None, None
+
+    def _match_student(name_line):
+        """
+        Try to find a student_id for a PDF name line like:
+          "Smith, Thomas (Tom)"   or   "O'Brien, Mary"   or   "Van Der Berg, Jan"
+        Returns student_id string or None.
+        """
+        # Split at first comma
+        parts = name_line.split(',', 1)
+        if len(parts) < 2:
+            return None
+        raw_last = parts[0].strip()
+        rest     = parts[1].strip()
+
+        # Extract preferred name from parens
+        pref_match = re.search(r'\(([^)]+)\)', rest)
+        pref_given = pref_match.group(1).strip().lower() if pref_match else ''
+        given_clean = re.sub(r'\([^)]*\)', '', rest).strip().lower()
+
+        key = re.sub(r'[\s\-\']', '', raw_last).lower()
+        candidates = surname_lookup.get(key, [])
+
+        if not candidates:
+            return None
+        if len(candidates) == 1:
+            return candidates[0]['sid']
+
+        # Disambiguate by first / preferred name
+        for c in candidates:
+            if c['first'] == given_clean or (pref_given and c['pref'] == pref_given):
+                return c['sid']
+        # Partial match
+        for c in candidates:
+            if given_clean and (given_clean in c['first'] or c['first'] in given_clean):
+                return c['sid']
+        # Fall back to first candidate
+        return candidates[0]['sid']
+
+    def _parse_contact_block(lines):
+        """
+        Given a list of raw text lines for a single student's contact section,
+        return {"home_address", "home_phone", "contacts": [...]}.
+        """
+        contacts = []
+        home_address = ""
+        home_phone   = ""
+
+        i = 0
+        while i < len(lines):
+            line = lines[i].strip()
+
+            # Skip blank / medical-section lines
+            if not line:
+                i += 1; continue
+            if re.match(r'(?i)^(medical|emergency contact|last changed)', line):
+                break  # stop at medical section
+
+            # ── Address line ───────────────────────────────────────────────
+            if _looks_like_address(line) and not _looks_like_home_mobile_header(line):
+                # Only grab first address as home address
+                if not home_address:
+                    home_address = line
+                i += 1; continue
+
+            # ── "Home: ... Mobile: ..." header line ───────────────────────
+            if _looks_like_home_mobile_header(line):
+                # May have a home phone embedded: "Home: 03 6262 1111  Mobile:"
+                home_m = re.search(r'(?i)home\s*:\s*([\d\s\-\(\)]+?)(?:\s+mobile\s*:|$)', line)
+                if home_m:
+                    ph, _ = _extract_phone(home_m.group(1))
+                    if ph and not home_phone:
+                        home_phone = ph
+                i += 1; continue
+
+            # ── Relationship + name line ───────────────────────────────────
+            # Pattern: "<Relation> <First> [<Last>]   Mobile: <num>"
+            # The relationship word is the first token
+            first_token = line.split()[0].lower().rstrip('.,')
+            if first_token in RELATIONSHIP_WORDS:
+                relation = line.split()[0]  # preserve original casing
+                remainder = line[len(relation):].strip()
+
+                # Extract Mobile from remainder
+                mob_match = re.search(r'(?i)mobile\s*:\s*([\d\s\-\(\)]+)', remainder)
+                mob_display, mob_link = (None, None)
+                if mob_match:
+                    mob_display, mob_link = _extract_phone(mob_match.group(1))
+                    name_part = remainder[:mob_match.start()].strip()
+                else:
+                    name_part = remainder.strip()
+
+                # Next line may be "Home: <num>  Work: <num>"
+                home2_ph = None
+                work_ph  = None
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    if re.match(r'(?i)home\s*:', next_line):
+                        h2m = re.search(r'(?i)home\s*:\s*([\d\s\-\(\)]+?)(?:\s+work\s*:|$)', next_line)
+                        if h2m:
+                            home2_ph, _ = _extract_phone(h2m.group(1))
+                        wm = re.search(r'(?i)work\s*:\s*([\d\s\-\(\)]+)', next_line)
+                        if wm:
+                            work_ph, _ = _extract_phone(wm.group(1))
+                        i += 1  # consume the Home/Work line
+
+                # Build phone object (prefer mobile, fall back to home/work)
+                phone_obj = None
+                if mob_display:
+                    phone_obj = {"display": mob_display, "link": mob_link}
+                elif home2_ph:
+                    clean = re.sub(r'[^\d+]', '', home2_ph)
+                    phone_obj = {"display": home2_ph, "link": f"tel:{clean}"}
+                elif work_ph:
+                    clean = re.sub(r'[^\d+]', '', work_ph)
+                    phone_obj = {"display": work_ph, "link": f"tel:{clean}"}
+
+                if name_part:
+                    contacts.append({
+                        "name": name_part,
+                        "relation": relation,
+                        "phone": phone_obj
+                    })
+                i += 1; continue
+
+            i += 1
+
+        return {"home_address": home_address, "home_phone": home_phone, "contacts": contacts}
+
+    # ── Main PDF scan ───────────────────────────────────────────────────────────
+    try:
+        if hasattr(pdf_file, 'seek'):
+            pdf_file.seek(0)
+
+        with pdfplumber.open(pdf_file) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                text = page.extract_text(x_tolerance=3, y_tolerance=3) or ""
+                lines = text.split('\n')
+
+                i = 0
+                while i < len(lines):
+                    line = lines[i].strip()
+
+                    # Look for a student name line: "Surname, First (Pref)" pattern
+                    # Must contain a comma and NOT start with known non-name prefixes
+                    if (',' in line
+                            and not re.match(r'(?i)^(student|dob|contact|home|mobile|medical|emergency|page\s)', line)
+                            and not re.search(r'(?i)(home\s*:|mobile\s*:|work\s*:|address\s*:)', line)
+                            and len(line) > 3):
+
+                        sid = _match_student(line)
+                        if sid:
+                            # Collect the next lines that belong to this student's contact block
+                            # until we hit another student name or end of page
+                            block_lines = []
+                            j = i + 1
+                            # Skip the DOB line (a line that is just a date dd/mm/yy)
+                            if j < len(lines) and re.match(r'\d{2}/\d{2}/\d{2,4}', lines[j].strip()):
+                                j += 1
+                            # Collect until next name-like line or medical keyword
+                            while j < len(lines):
+                                candidate = lines[j].strip()
+                                # Stop if this looks like a new student name
+                                if (',' in candidate
+                                        and not re.search(r'(?i)(home\s*:|mobile\s*:|work\s*:|address\s*:)', candidate)
+                                        and not re.match(r'(?i)^(student|dob|contact|home|mobile|medical|emergency)', candidate)
+                                        and _match_student(candidate) is not None
+                                        and _match_student(candidate) != sid):
+                                    break
+                                block_lines.append(candidate)
+                                j += 1
+
+                            parsed = _parse_contact_block(block_lines)
+                            if parsed['contacts'] or parsed['home_address']:
+                                # Merge if student already partially populated (multi-page)
+                                if sid in results:
+                                    existing = results[sid]
+                                    if not existing['home_address'] and parsed['home_address']:
+                                        existing['home_address'] = parsed['home_address']
+                                    if not existing['home_phone'] and parsed['home_phone']:
+                                        existing['home_phone'] = parsed['home_phone']
+                                    existing['contacts'].extend(parsed['contacts'])
+                                else:
+                                    results[sid] = parsed
+                            i = j
+                            continue
+                    i += 1
+
+    except Exception as e:
+        parse_errors.append(str(e))
+        import traceback
+        print(f"[parse_excursion_pdf] Error: {e}\n{traceback.format_exc()}")
+
+    if parse_errors:
+        print(f"[parse_excursion_pdf] Completed with errors: {parse_errors}")
+
+    print(f"[parse_excursion_pdf] Parsed contact data for {len(results)} students.")
+    return results
+
 
 def parse_emergency_contact_names(emergency_text):
     """
@@ -1890,6 +2156,15 @@ with t1:
         """, unsafe_allow_html=True)
         photo_perm_csv = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed")
 
+    with col_f2:
+        st.markdown("""
+        <div class="upload-card optional">
+          <div class="upload-card-label">Excursion Info PDF</div>
+          <div class="upload-card-desc">Adds home address and parent/guardian contacts from the school excursion student information PDF.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        excursion_pdf = st.file_uploader("Excursion Info PDF", type="pdf", label_visibility="collapsed")
+
     # ── File processing (logic unchanged) ─────────────────────────────────────
     if csv:
         df_temp = pd.read_csv(csv).fillna("")
@@ -1937,6 +2212,19 @@ with t1:
     if photo_perm_csv:
         st.session_state.photo_perm_csv = photo_perm_csv
         st.success("✅ Photo permissions CSV loaded")
+
+    if excursion_pdf:
+        if "df" in st.session_state:
+            with st.spinner("Parsing excursion PDF for home contact details…"):
+                excursion_map = parse_excursion_pdf(excursion_pdf, st.session_state.df)
+                st.session_state.excursion_contact_map = excursion_map
+            n_found = len(excursion_map)
+            if n_found > 0:
+                st.success(f"✅ Excursion PDF parsed — home contacts found for {n_found} students")
+            else:
+                st.warning("⚠️  Excursion PDF uploaded but no student contacts could be parsed. Check the PDF format matches the expected layout.")
+        else:
+            st.warning("⚠️  Please upload the Student List CSV first, then re-upload the Excursion PDF so names can be matched.")
 
     if photos:
         path = os.path.join(TEMP_DIR, "photos.pdf")
@@ -2491,7 +2779,13 @@ with t2:
                 raw_emerg = str(r.get(COLS['emergency_notes'], ""))
                 parsed_med  = parse_medical_text(raw_med)
                 parsed_con  = parse_emergency_contacts(raw_emerg)
-                parsed_home = parse_home_contacts(r)
+
+                # Prefer excursion PDF home contacts over CSV contacts when available
+                excursion_map = st.session_state.get('excursion_contact_map', {})
+                if sid in excursion_map:
+                    parsed_home = excursion_map[sid]
+                else:
+                    parsed_home = parse_home_contacts(r)
 
                 sections = []
                 layout = CONFIG["default_profile_layout"]
