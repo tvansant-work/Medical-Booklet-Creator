@@ -1614,47 +1614,40 @@ st.markdown("""
     font-size: 0.75rem; color: #b0b3c4;
   }
 
-  /* ── Feature cards: top body ── */
-  .fc-top {
-    background: #ffffff;
-    border: 2px solid #e2e5ee;
-    border-bottom: none;
-    border-radius: 14px 14px 0 0;
-    padding: 28px 24px 20px;
-    text-align: center;
-    transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s;
-    margin-bottom: 0;
-  }
-  .fc-top-icon { font-size: 2.5rem; margin-bottom: 10px; }
-  .fc-top-title { font-size: 1.02rem; font-weight: 700; color: #1a1d2e; margin-bottom: 6px; }
-  .fc-top-desc { font-size: 0.82rem; color: #6b6f82; line-height: 1.55; }
-
-  /* ── Feature cards: CTA button (bottom of card) ── */
-  .fc-btn-wrap { margin-top: 0 !important; }
-  .fc-btn-wrap > div > button {
-    border-radius: 0 0 14px 14px !important;
-    border: 2px solid #e2e5ee !important;
-    border-top: 1px solid #e2e5ee !important;
-    background: #f8fffe !important;
-    color: #1a7f6e !important;
-    font-weight: 600 !important;
-    font-size: 0.88rem !important;
-    padding: 13px 24px !important;
+  /* ── Feature selection cards — full-card clickable buttons ── */
+  /* Target via :has() on the column that contains the unique marker span */
+  [data-testid="stColumn"]:has(#fc-booklet-marker) [data-testid="stBaseButton-secondary"] > button,
+  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button {
+    all: unset !important;
+    display: block !important;
     width: 100% !important;
-    transition: background 0.15s, border-color 0.18s !important;
+    background: #ffffff !important;
+    border: 2px solid #e2e5ee !important;
+    border-radius: 14px !important;
+    padding: 32px 28px !important;
+    text-align: center !important;
+    cursor: pointer !important;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.14s !important;
+    color: #6b6f82 !important;
+    font-size: 0.84rem !important;
+    line-height: 1.65 !important;
+    box-sizing: border-box !important;
+    min-height: 220px !important;
+    white-space: pre-line !important;
+    letter-spacing: 0 !important;
   }
-  .fc-btn-wrap > div > button:hover {
-    background: #e4f5f1 !important;
+  [data-testid="stColumn"]:has(#fc-booklet-marker) [data-testid="stBaseButton-secondary"] > button p,
+  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button p {
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+  [data-testid="stColumn"]:has(#fc-booklet-marker) [data-testid="stBaseButton-secondary"] > button:hover,
+  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button:hover {
     border-color: #1a7f6e !important;
-    color: #145f52 !important;
+    box-shadow: 0 6px 24px rgba(26,127,110,0.13) !important;
+    transform: translateY(-3px) !important;
+    color: #1a1d2e !important;
   }
-  /* Sync top-card hover when button is hovered — uses :has() */
-  .fc-wrap:has(.fc-btn-wrap > div > button:hover) .fc-top {
-    border-color: #1a7f6e;
-    box-shadow: 0 4px 20px rgba(26,127,110,0.10);
-    transform: translateY(-2px);
-  }
-  .fc-wrap { display: flex; flex-direction: column; }
 </style>""", unsafe_allow_html=True)
 
 
@@ -1900,7 +1893,12 @@ if st.session_state.get("_go_setup"):
     st.session_state._go_setup = False
     st.components.v1.html("""
     <script>
-        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[1].click();
+        function clickTab(idx) {
+            var tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]');
+            if (tabs[idx]) { tabs[idx].click(); }
+            else { setTimeout(function(){ clickTab(idx); }, 80); }
+        }
+        setTimeout(function(){ clickTab(1); }, 120);
     </script>
     """, height=0)
 
@@ -1909,7 +1907,12 @@ if st.session_state.get("_go_group"):
     st.session_state._go_group = False
     st.components.v1.html("""
     <script>
-        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[1].click();
+        function clickTab(idx) {
+            var tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]');
+            if (tabs[idx]) { tabs[idx].click(); }
+            else { setTimeout(function(){ clickTab(idx); }, 80); }
+        }
+        setTimeout(function(){ clickTab(1); }, 120);
     </script>
     """, height=0)
 
@@ -1918,7 +1921,12 @@ if st.session_state.get("_active_tab") == 1:
     st.session_state._active_tab = None
     st.components.v1.html("""
     <script>
-        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[2].click();
+        function clickTab(idx) {
+            var tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]');
+            if (tabs[idx]) { tabs[idx].click(); }
+            else { setTimeout(function(){ clickTab(idx); }, 80); }
+        }
+        setTimeout(function(){ clickTab(2); }, 120);
     </script>
     """, height=0)
 
@@ -1934,34 +1942,28 @@ with t0:
     home_col1, home_col2 = st.columns(2)
 
     with home_col1:
-        st.markdown('''<div class="fc-wrap">
-          <div class="fc-top">
-            <div class="fc-top-icon">📋</div>
-            <div class="fc-top-title">Medical Booklet Creator</div>
-            <div class="fc-top-desc">Generate student medical profile PDFs for excursions — medical info, emergency contacts, swimming ability, dietary requirements and more.</div>
-          </div>
-        </div>''', unsafe_allow_html=True)
-        st.markdown('<div class="fc-btn-wrap">', unsafe_allow_html=True)
-        if st.button("→  Open Booklet Creator", use_container_width=True, key="home_booklet_btn"):
+        # Hidden marker lets CSS target and style this column's button as a card
+        st.markdown('<span id="fc-booklet-marker" style="display:none"></span>', unsafe_allow_html=True)
+        if st.button(
+            "📋\n\n**Medical Booklet Creator**\n\nGenerate student medical profile PDFs for excursions — medical info, emergency contacts, swimming ability, dietary requirements and more.",
+            use_container_width=True,
+            key="home_booklet_btn"
+        ):
             st.session_state.active_feature = 'booklet'
             st.session_state._go_setup = True
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
     with home_col2:
-        st.markdown('''<div class="fc-wrap">
-          <div class="fc-top">
-            <div class="fc-top-icon">👥</div>
-            <div class="fc-top-title">SEQTA Group Creator</div>
-            <div class="fc-top-desc">Paste student email addresses and the app looks up their student codes — ready to paste into SEQTA to create a custom group.</div>
-          </div>
-        </div>''', unsafe_allow_html=True)
-        st.markdown('<div class="fc-btn-wrap">', unsafe_allow_html=True)
-        if st.button("→  Open Group Creator", use_container_width=True, key="home_group_btn"):
+        # Hidden marker lets CSS target and style this column's button as a card
+        st.markdown('<span id="fc-group-marker" style="display:none"></span>', unsafe_allow_html=True)
+        if st.button(
+            "👥\n\n**SEQTA Group Creator**\n\nPaste student email addresses and the app looks up their student codes — ready to paste into SEQTA to create a custom group.",
+            use_container_width=True,
+            key="home_group_btn"
+        ):
             st.session_state.active_feature = 'group'
             st.session_state._go_group = True
             st.rerun()
-        st.markdown('</div>', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — SETUP
@@ -2783,37 +2785,37 @@ if t3 is not None:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    gc_col1, gc_col2 = st.columns([3, 2])
+    # ── Step 1: Email addresses ───────────────────────────────────────────────
+    st.markdown('''<div class="section-head">Step 1 — Student Email Addresses</div>''', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">Paste emails separated by spaces, commas, semicolons, newlines or any mix.</p>', unsafe_allow_html=True)
+    email_input = st.text_area(
+        "Email addresses",
+        value=st.session_state.group_email_input,
+        height=160,
+        placeholder="e.g.\nsmith.j@school.edu.au, jones.k@school.edu.au\nbrown.t@school.edu.au",
+        label_visibility="collapsed",
+        key="gc_email_box"
+    )
+    st.session_state.group_email_input = email_input
 
-    with gc_col1:
-        st.markdown('<p style="font-size:0.85rem;font-weight:600;color:#1a1d2e;margin-bottom:4px;">Student Email Addresses</p>', unsafe_allow_html=True)
-        st.markdown('<p style="font-size:0.76rem;color:#9295a8;margin-bottom:8px;">Paste emails separated by spaces, commas, semicolons, newlines or any mix.</p>', unsafe_allow_html=True)
-        email_input = st.text_area(
-            "Email addresses",
-            value=st.session_state.group_email_input,
-            height=180,
-            placeholder="e.g.\nsmith.j@school.edu.au, jones.k@school.edu.au\nbrown.t@school.edu.au",
-            label_visibility="collapsed",
-            key="gc_email_box"
-        )
-        st.session_state.group_email_input = email_input
-
-    with gc_col2:
-        st.markdown("""
-        <div class="upload-card">
-          <div class="upload-card-label">Student List CSV</div>
-          <div class="upload-card-desc">The same student list CSV from Seqta — used to look up student codes from email addresses.</div>
-        </div>
-        """, unsafe_allow_html=True)
-        gc_csv = st.file_uploader(
-            "Student List CSV for group creator",
-            type="csv",
-            label_visibility="collapsed",
-            key="gc_csv_uploader"
-        )
-        # If the booklet CSV is already loaded, offer to reuse it
-        if gc_csv is None and "df_final" in st.session_state:
-            st.caption("💡 A student list is already loaded from the Booklet Creator — it will be used automatically if no file is uploaded here.")
+    # ── Step 2: Student List CSV ──────────────────────────────────────────────
+    st.markdown('''<div class="section-head">Step 2 — Student List CSV</div>''', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="upload-card">
+      <div class="upload-card-label">Student List CSV</div>
+      <div class="upload-card-desc">The same student list CSV from Seqta — used to look up student codes from email addresses.
+      <br><a class="seqta-link" href="{SEQTA_URL}" target="_blank" style="margin-top:6px;display:inline-flex">↗ Open in Seqta</a></div>
+    </div>
+    """, unsafe_allow_html=True)
+    gc_csv = st.file_uploader(
+        "Student List CSV for group creator",
+        type="csv",
+        label_visibility="collapsed",
+        key="gc_csv_uploader"
+    )
+    # If the booklet CSV is already loaded, offer to reuse it
+    if gc_csv is None and "df_final" in st.session_state:
+        st.caption("💡 A student list is already loaded from the Booklet Creator — it will be used automatically if no file is uploaded here.")
 
     st.markdown("<br>", unsafe_allow_html=True)
     run_gc = st.button("🔍  Find Student Codes", type="primary", key="gc_run_btn")
