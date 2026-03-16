@@ -1614,59 +1614,49 @@ st.markdown("""
     font-size: 0.75rem; color: #b0b3c4;
   }
 
-  /* ── Card buttons — make entire card the button ── */
-  div[data-testid="stVerticalBlock"] .feature-btn-wrap > div > button {
-    all: unset !important;
-    display: block !important;
-    width: 100% !important;
-    background: #ffffff !important;
+  /* ── Feature cards: top body ── */
+  .fc-top {
+    background: #ffffff;
+    border: 2px solid #e2e5ee;
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    padding: 28px 24px 20px;
+    text-align: center;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s;
+    margin-bottom: 0;
+  }
+  .fc-top-icon { font-size: 2.5rem; margin-bottom: 10px; }
+  .fc-top-title { font-size: 1.02rem; font-weight: 700; color: #1a1d2e; margin-bottom: 6px; }
+  .fc-top-desc { font-size: 0.82rem; color: #6b6f82; line-height: 1.55; }
+
+  /* ── Feature cards: CTA button (bottom of card) ── */
+  .fc-btn-wrap { margin-top: 0 !important; }
+  .fc-btn-wrap > div > button {
+    border-radius: 0 0 14px 14px !important;
     border: 2px solid #e2e5ee !important;
-    border-radius: 14px !important;
-    padding: 28px 24px !important;
-    text-align: center !important;
-    cursor: pointer !important;
-    transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s !important;
-    color: #1a1d2e !important;
-    font-size: 0.95rem !important;
-    line-height: 1.5 !important;
-    box-sizing: border-box !important;
-    height: auto !important;
-    min-height: 180px !important;
-    white-space: pre-wrap !important;
+    border-top: 1px solid #e2e5ee !important;
+    background: #f8fffe !important;
+    color: #1a7f6e !important;
+    font-weight: 600 !important;
+    font-size: 0.88rem !important;
+    padding: 13px 24px !important;
+    width: 100% !important;
+    transition: background 0.15s, border-color 0.18s !important;
   }
-  div[data-testid="stVerticalBlock"] .feature-btn-wrap > div > button:hover {
+  .fc-btn-wrap > div > button:hover {
+    background: #e4f5f1 !important;
     border-color: #1a7f6e !important;
-    box-shadow: 0 4px 20px rgba(26,127,110,0.13) !important;
-    transform: translateY(-2px) !important;
+    color: #145f52 !important;
   }
-  div[data-testid="stVerticalBlock"] .feature-btn-wrap > div > button:focus {
-    border-color: #1a7f6e !important;
-    box-shadow: 0 0 0 3px rgba(26,127,110,0.18) !important;
-    outline: none !important;
+  /* Sync top-card hover when button is hovered — uses :has() */
+  .fc-wrap:has(.fc-btn-wrap > div > button:hover) .fc-top {
+    border-color: #1a7f6e;
+    box-shadow: 0 4px 20px rgba(26,127,110,0.10);
+    transform: translateY(-2px);
   }
+  .fc-wrap { display: flex; flex-direction: column; }
 </style>""", unsafe_allow_html=True)
 
-# ── Dynamic tab visibility based on active feature ────────────────────────────
-_feature = st.session_state.get("active_feature", None)
-if _feature == "booklet":
-    # Show: Home(1), Booklet Setup(2), Process(3) — hide Group(4)
-    _tab_css = """
-    [data-testid="stTabs"] [role="tablist"] > div:nth-child(4) { display: none !important; }
-    """
-elif _feature == "group":
-    # Show: Home(1), Group(4) — hide Booklet Setup(2), Process(3)
-    _tab_css = """
-    [data-testid="stTabs"] [role="tablist"] > div:nth-child(2) { display: none !important; }
-    [data-testid="stTabs"] [role="tablist"] > div:nth-child(3) { display: none !important; }
-    """
-else:
-    # Home only — hide all feature tabs
-    _tab_css = """
-    [data-testid="stTabs"] [role="tablist"] > div:nth-child(2) { display: none !important; }
-    [data-testid="stTabs"] [role="tablist"] > div:nth-child(3) { display: none !important; }
-    [data-testid="stTabs"] [role="tablist"] > div:nth-child(4) { display: none !important; }
-    """
-st.markdown(f"<style>{_tab_css}</style>", unsafe_allow_html=True)
 
 st.markdown("""<style>
   [data-testid="stFileUploader"] { background: #fafcfb; border-radius: 8px; }
@@ -1691,20 +1681,7 @@ st.markdown("""<style>
     background: linear-gradient(90deg, #1a7f6e, #2563a8) !important;
   }
 
-  /* ── Feature selector cards ── */
-  .feature-card {
-    background: #ffffff;
-    border: 2px solid #e2e5ee;
-    border-radius: 14px;
-    padding: 28px 24px;
-    text-align: center;
-    transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s;
-  }
-  .feature-card-icon { font-size: 2.6rem; margin-bottom: 12px; }
-  .feature-card-title {
-    font-size: 1.05rem; font-weight: 700; color: #1a1d2e; margin-bottom: 6px;
-  }
-  .feature-card-desc { font-size: 0.82rem; color: #6b6f82; line-height: 1.5; }
+
 
   /* ── Group creator output box ── */
   .group-output-wrap {
@@ -1899,18 +1876,26 @@ if "auto_downloaded_plans" not in st.session_state: st.session_state.auto_downlo
 if "auto_downloaded_plan_files" not in st.session_state: st.session_state.auto_downloaded_plan_files = {}
 if "manual_plan_uploads" not in st.session_state: st.session_state.manual_plan_uploads = {}
 
-t0, t1, t2, t3 = st.tabs(["  🏠 Home  ", "  📋 Booklet Setup  ", "  ⚙️ Process & Generate  ", "  👥 Group Creator  "])
+# ── Build only the tabs that are needed for the current feature ──────────────
+_active_feature = st.session_state.get("active_feature", None)
 
-# Auto-switch: → Process & Generate tab (index 2)
-if st.session_state.get("_active_tab") == 1:
-    st.session_state._active_tab = None
-    st.components.v1.html("""
-    <script>
-        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[2].click();
-    </script>
-    """, height=0)
+if _active_feature == "booklet":
+    _tab_labels = ["  🏠 Home  ", "  📋 Booklet Setup  ", "  ⚙️ Process & Generate  "]
+    _tabs = st.tabs(_tab_labels)
+    t0, t1, t2 = _tabs
+    t3 = None
+elif _active_feature == "group":
+    _tab_labels = ["  🏠 Home  ", "  👥 Group Creator  "]
+    _tabs = st.tabs(_tab_labels)
+    t0, t3 = _tabs
+    t1 = t2 = None
+else:
+    _tab_labels = ["  🏠 Home  "]
+    _tabs = st.tabs(_tab_labels)
+    t0 = _tabs[0]
+    t1 = t2 = t3 = None
 
-# Auto-switch: → Booklet Setup tab (index 1)
+# Auto-switch: → Booklet Setup tab (index 1 when feature=booklet)
 if st.session_state.get("_go_setup"):
     st.session_state._go_setup = False
     st.components.v1.html("""
@@ -1919,12 +1904,21 @@ if st.session_state.get("_go_setup"):
     </script>
     """, height=0)
 
-# Auto-switch: → Group Creator tab (index 3)
+# Auto-switch: → Group Creator tab (index 1 when feature=group)
 if st.session_state.get("_go_group"):
     st.session_state._go_group = False
     st.components.v1.html("""
     <script>
-        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[3].click();
+        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[1].click();
+    </script>
+    """, height=0)
+
+# Auto-switch: → Process & Generate tab (index 2 when feature=booklet)
+if st.session_state.get("_active_tab") == 1:
+    st.session_state._active_tab = None
+    st.components.v1.html("""
+    <script>
+        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[2].click();
     </script>
     """, height=0)
 
@@ -1940,24 +1934,30 @@ with t0:
     home_col1, home_col2 = st.columns(2)
 
     with home_col1:
-        st.markdown('<div class="feature-btn-wrap">', unsafe_allow_html=True)
-        if st.button(
-            "📋\n\nMedical Booklet Creator\n\nGenerate student medical profile PDFs for excursions — medical info, emergency contacts, swimming ability, dietary requirements and more.\n\n→ Open Booklet Creator",
-            use_container_width=True,
-            key="home_booklet_btn"
-        ):
+        st.markdown('''<div class="fc-wrap">
+          <div class="fc-top">
+            <div class="fc-top-icon">📋</div>
+            <div class="fc-top-title">Medical Booklet Creator</div>
+            <div class="fc-top-desc">Generate student medical profile PDFs for excursions — medical info, emergency contacts, swimming ability, dietary requirements and more.</div>
+          </div>
+        </div>''', unsafe_allow_html=True)
+        st.markdown('<div class="fc-btn-wrap">', unsafe_allow_html=True)
+        if st.button("→  Open Booklet Creator", use_container_width=True, key="home_booklet_btn"):
             st.session_state.active_feature = 'booklet'
             st.session_state._go_setup = True
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
     with home_col2:
-        st.markdown('<div class="feature-btn-wrap">', unsafe_allow_html=True)
-        if st.button(
-            "👥\n\nSEQTA Group Creator\n\nPaste student email addresses and the app looks up their student codes — ready to paste into SEQTA to create a custom group.\n\n→ Open Group Creator",
-            use_container_width=True,
-            key="home_group_btn"
-        ):
+        st.markdown('''<div class="fc-wrap">
+          <div class="fc-top">
+            <div class="fc-top-icon">👥</div>
+            <div class="fc-top-title">SEQTA Group Creator</div>
+            <div class="fc-top-desc">Paste student email addresses and the app looks up their student codes — ready to paste into SEQTA to create a custom group.</div>
+          </div>
+        </div>''', unsafe_allow_html=True)
+        st.markdown('<div class="fc-btn-wrap">', unsafe_allow_html=True)
+        if st.button("→  Open Group Creator", use_container_width=True, key="home_group_btn"):
             st.session_state.active_feature = 'group'
             st.session_state._go_group = True
             st.rerun()
@@ -1966,7 +1966,8 @@ with t0:
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — SETUP
 # ═══════════════════════════════════════════════════════════════════════════════
-with t1:
+if t1 is not None:
+ with t1:
 
     st.session_state.project_title = st.text_input(
         "Booklet title",
@@ -2108,7 +2109,8 @@ with t1:
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — PROCESS & GENERATE
 # ═══════════════════════════════════════════════════════════════════════════════
-with t2:
+if t2 is not None:
+ with t2:
 
     if "df_final" not in st.session_state or "photo_pdf" not in st.session_state:
         st.info("Upload a Student List CSV and Photos PDF in the Setup tab first.")
@@ -2769,21 +2771,15 @@ with t2:
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — SEQTA GROUP CREATOR
 # ═══════════════════════════════════════════════════════════════════════════════
-with t3:
+if t3 is not None:
+ with t3:
 
     st.markdown('<div class="section-head">SEQTA Group Creator</div>', unsafe_allow_html=True)
     st.markdown(
-        "Paste student email addresses and (optionally) upload a Student List CSV. "
-        "The app will match emails to student ID codes — ready to paste into SEQTA."
+        'Paste student email addresses and (optionally) upload a Student List CSV. '
+        'The app will match emails to student ID codes — ready to paste into <a href="https://teach.friends.tas.edu.au/students/classes" target="_blank" style="color:#1a7f6e;font-weight:600">SEQTA</a>.',
+        unsafe_allow_html=True
     )
-
-    # ── Seqta instruction banner ──────────────────────────────────────────────
-    st.markdown("""
-    <div class="seqta-instruction">
-      <strong>📌 How to use in SEQTA:</strong> Go to the group you want to add students to,
-      then <em>enter or paste student codes one per line</em> in the box and click <strong>OK</strong>.
-    </div>
-    """, unsafe_allow_html=True)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
@@ -2944,7 +2940,8 @@ with t3:
                     )
                     st.markdown("""
                     <div class="seqta-instruction">
-                      <strong>📌 Next step:</strong> In SEQTA, open your custom group editor,
+                      <strong>📌 Next step:</strong> In SEQTA, open your
+                      <a href="https://teach.friends.tas.edu.au/students/classes" target="_blank" style="color:#7a5a00;font-weight:600">custom group editor</a>,
                       paste these codes one per line into the box on the left, then click <strong>OK</strong>.
                     </div>
                     """, unsafe_allow_html=True)
@@ -2977,6 +2974,6 @@ with t3:
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="mbc-footer">
-  School Tools &nbsp;·&nbsp; Created by Thomas van Sant
+  Medical Booklet Tools &nbsp;·&nbsp; Created by Thomas van Sant
 </div>
 """, unsafe_allow_html=True)
