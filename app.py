@@ -1888,47 +1888,40 @@ else:
     t0 = _tabs[0]
     t1 = t2 = t3 = None
 
+# ── Auto-tab-switch helper (injected as a hidden iframe via st.components) ────
+def _inject_tab_click(tab_index):
+    """Reliably clicks a Streamlit tab by index after the DOM has settled."""
+    fn = f"clickTab_{tab_index}_{id(tab_index)}"
+    st.components.v1.html(f"""
+    <script>
+        var _attempts = 0;
+        function {fn}() {{
+            var tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]');
+            if (tabs.length > {tab_index} && tabs[{tab_index}]) {{
+                tabs[{tab_index}].click();
+            }} else if (_attempts < 20) {{
+                _attempts++;
+                setTimeout({fn}, 100);
+            }}
+        }}
+        setTimeout({fn}, 200);
+    </script>
+    """, height=0)
+
 # Auto-switch: → Booklet Setup tab (index 1 when feature=booklet)
 if st.session_state.get("_go_setup"):
     st.session_state._go_setup = False
-    st.components.v1.html("""
-    <script>
-        function clickTab(idx) {
-            var tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]');
-            if (tabs[idx]) { tabs[idx].click(); }
-            else { setTimeout(function(){ clickTab(idx); }, 80); }
-        }
-        setTimeout(function(){ clickTab(1); }, 120);
-    </script>
-    """, height=0)
+    _inject_tab_click(1)
 
 # Auto-switch: → Group Creator tab (index 1 when feature=group)
 if st.session_state.get("_go_group"):
     st.session_state._go_group = False
-    st.components.v1.html("""
-    <script>
-        function clickTab(idx) {
-            var tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]');
-            if (tabs[idx]) { tabs[idx].click(); }
-            else { setTimeout(function(){ clickTab(idx); }, 80); }
-        }
-        setTimeout(function(){ clickTab(1); }, 120);
-    </script>
-    """, height=0)
+    _inject_tab_click(1)
 
 # Auto-switch: → Process & Generate tab (index 2 when feature=booklet)
 if st.session_state.get("_active_tab") == 1:
     st.session_state._active_tab = None
-    st.components.v1.html("""
-    <script>
-        function clickTab(idx) {
-            var tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]');
-            if (tabs[idx]) { tabs[idx].click(); }
-            else { setTimeout(function(){ clickTab(idx); }, 80); }
-        }
-        setTimeout(function(){ clickTab(2); }, 120);
-    </script>
-    """, height=0)
+    _inject_tab_click(2)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 0 — HOME / FEATURE SELECTOR
