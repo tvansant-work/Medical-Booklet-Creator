@@ -1890,17 +1890,21 @@ else:
 
 # ── Auto-tab-switch helper (injected as a hidden iframe via st.components) ────
 def _inject_tab_click(tab_index):
-    """Reliably clicks a Streamlit tab by index after the DOM has settled."""
-    fn = f"clickTab_{tab_index}_{id(tab_index)}"
+    """Reliably clicks a Streamlit tab by index after the DOM has settled.
+    Uses a time-based nonce so Streamlit always treats this as new content
+    and re-renders the iframe — otherwise identical HTML is skipped on rerun."""
+    import time
+    nonce = int(time.time() * 1000)
+    fn = f"clickTab_{tab_index}_{nonce}"
     st.components.v1.html(f"""
     <script>
-        var _attempts = 0;
+        var _attempts_{nonce} = 0;
         function {fn}() {{
             var tabs = window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]');
             if (tabs.length > {tab_index} && tabs[{tab_index}]) {{
                 tabs[{tab_index}].click();
-            }} else if (_attempts < 20) {{
-                _attempts++;
+            }} else if (_attempts_{nonce} < 20) {{
+                _attempts_{nonce}++;
                 setTimeout({fn}, 100);
             }}
         }}
