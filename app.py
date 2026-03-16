@@ -49,6 +49,12 @@ if 'dietary_manual_selections' not in st.session_state:
     st.session_state.dietary_manual_selections = {} # Stores { 'dietary_idx': 'student_id' }
 if 'photo_permissions_map' not in st.session_state:
     st.session_state.photo_permissions_map = {} # Stores { 'student_id': 'Yes'|'No'|'No Response' }
+if 'active_feature' not in st.session_state:
+    st.session_state.active_feature = None  # None | 'booklet' | 'group'
+if 'group_results' not in st.session_state:
+    st.session_state.group_results = None  # Stores last group creator results
+if 'group_email_input' not in st.session_state:
+    st.session_state.group_email_input = ""
 import pandas as pd
 import zipfile
 import yaml
@@ -71,9 +77,9 @@ TEMP_DIR = os.path.join(BASE_DIR, "_temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 st.set_page_config(
-    page_title="Medical Booklet Creator",
+    page_title="School Tools",
     layout="wide",
-    page_icon="📋",
+    page_icon="🏫",
     menu_items={
         "Get help": None,
         "Report a bug": None,
@@ -1630,6 +1636,49 @@ st.markdown("""
   [data-testid="stProgress"] > div > div {
     background: linear-gradient(90deg, #1a7f6e, #2563a8) !important;
   }
+
+  /* ── Feature selector cards ── */
+  .feature-card {
+    background: #ffffff;
+    border: 2px solid #e2e5ee;
+    border-radius: 14px;
+    padding: 28px 24px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s;
+  }
+  .feature-card:hover {
+    border-color: #1a7f6e;
+    box-shadow: 0 4px 20px rgba(26,127,110,0.12);
+    transform: translateY(-2px);
+  }
+  .feature-card-icon { font-size: 2.6rem; margin-bottom: 12px; }
+  .feature-card-title {
+    font-size: 1.05rem; font-weight: 700; color: #1a1d2e; margin-bottom: 6px;
+  }
+  .feature-card-desc { font-size: 0.82rem; color: #6b6f82; line-height: 1.5; }
+
+  /* ── Group creator output box ── */
+  .group-output-wrap {
+    background: #f0faf8;
+    border: 2px solid #a8ddd6;
+    border-radius: 10px;
+    padding: 16px 18px;
+    margin-top: 12px;
+  }
+  .group-output-label {
+    font-size: 0.75rem; font-weight: 700; color: #1a7f6e;
+    text-transform: uppercase; letter-spacing: 0.07em; margin-bottom: 8px;
+  }
+  .seqta-instruction {
+    background: #fff8e6;
+    border-left: 4px solid #e8960a;
+    border-radius: 6px;
+    padding: 10px 14px;
+    font-size: 0.82rem;
+    color: #7a5a00;
+    margin-top: 10px;
+  }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1747,7 +1796,7 @@ st.markdown("""
 
 _h1, _h2 = st.columns([11, 1])
 with _h1:
-    st.markdown("**📋 Medical Booklet Creator**")
+    st.markdown("**🏫 School Tools**")
     st.caption("Created by Thomas van Sant")
 with _h2:
     with st.popover("•••"):
@@ -1802,17 +1851,73 @@ if "auto_downloaded_plans" not in st.session_state: st.session_state.auto_downlo
 if "auto_downloaded_plan_files" not in st.session_state: st.session_state.auto_downloaded_plan_files = {}
 if "manual_plan_uploads" not in st.session_state: st.session_state.manual_plan_uploads = {}
 
-t1, t2 = st.tabs(["  Setup  ", "  Process & Generate  "])
+t0, t1, t2, t3 = st.tabs(["  🏠 Home  ", "  📋 Booklet Setup  ", "  ⚙️ Process & Generate  ", "  👥 Group Creator  "])
 
-# Auto-switch to tab 2 if the button was clicked
+# Auto-switch: → Process & Generate tab (index 2)
 if st.session_state.get("_active_tab") == 1:
     st.session_state._active_tab = None
     st.components.v1.html("""
     <script>
-        // Click the second tab (Process & Generate)
+        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[2].click();
+    </script>
+    """, height=0)
+
+# Auto-switch: → Booklet Setup tab (index 1)
+if st.session_state.get("_go_setup"):
+    st.session_state._go_setup = False
+    st.components.v1.html("""
+    <script>
         window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[1].click();
     </script>
     """, height=0)
+
+# Auto-switch: → Group Creator tab (index 3)
+if st.session_state.get("_go_group"):
+    st.session_state._go_group = False
+    st.components.v1.html("""
+    <script>
+        window.parent.document.querySelectorAll('[data-testid="stTabs"] [role="tab"]')[3].click();
+    </script>
+    """, height=0)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 0 — HOME / FEATURE SELECTOR
+# ═══════════════════════════════════════════════════════════════════════════════
+with t0:
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.markdown("### What would you like to do?")
+    st.markdown("Choose a feature below to get started.", unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    home_col1, home_col2 = st.columns(2)
+
+    with home_col1:
+        st.markdown("""
+        <div class="feature-card">
+          <div class="feature-card-icon">📋</div>
+          <div class="feature-card-title">Medical Booklet Creator</div>
+          <div class="feature-card-desc">Generate student medical profile PDFs for excursions and field activities — medical info, emergency contacts, swimming ability, dietary requirements and more.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("<br style='margin-top:-8px'>", unsafe_allow_html=True)
+        if st.button("Open Booklet Creator →", use_container_width=True, type="primary", key="home_booklet_btn"):
+            st.session_state.active_feature = 'booklet'
+            st.session_state._go_setup = True
+            st.rerun()
+
+    with home_col2:
+        st.markdown("""
+        <div class="feature-card">
+          <div class="feature-card-icon">👥</div>
+          <div class="feature-card-title">SEQTA Group Creator</div>
+          <div class="feature-card-desc">Paste a list of student email addresses and the app will look up their student codes — ready to paste straight into SEQTA to create a custom group.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("<br style='margin-top:-8px'>", unsafe_allow_html=True)
+        if st.button("Open Group Creator →", use_container_width=True, key="home_group_btn"):
+            st.session_state.active_feature = 'group'
+            st.session_state._go_group = True
+            st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — SETUP
@@ -2616,9 +2721,217 @@ with t2:
                 st.download_button("⬇ Download Medical Booklet", data=pdf_data,
                                    file_name="Medical_Booklet.pdf", mime="application/pdf")
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 3 — SEQTA GROUP CREATOR
+# ═══════════════════════════════════════════════════════════════════════════════
+with t3:
+
+    st.markdown('<div class="section-head">SEQTA Group Creator</div>', unsafe_allow_html=True)
+    st.markdown(
+        "Paste student email addresses and (optionally) upload a Student List CSV. "
+        "The app will match emails to student ID codes — ready to paste into SEQTA."
+    )
+
+    # ── Seqta instruction banner ──────────────────────────────────────────────
+    st.markdown("""
+    <div class="seqta-instruction">
+      <strong>📌 How to use in SEQTA:</strong> Go to the group you want to add students to,
+      then <em>enter or paste student codes one per line</em> in the box and click <strong>OK</strong>.
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    gc_col1, gc_col2 = st.columns([3, 2])
+
+    with gc_col1:
+        st.markdown('<p style="font-size:0.85rem;font-weight:600;color:#1a1d2e;margin-bottom:4px;">Student Email Addresses</p>', unsafe_allow_html=True)
+        st.markdown('<p style="font-size:0.76rem;color:#9295a8;margin-bottom:8px;">Paste emails separated by spaces, commas, semicolons, newlines or any mix.</p>', unsafe_allow_html=True)
+        email_input = st.text_area(
+            "Email addresses",
+            value=st.session_state.group_email_input,
+            height=180,
+            placeholder="e.g.\nsmith.j@school.edu.au, jones.k@school.edu.au\nbrown.t@school.edu.au",
+            label_visibility="collapsed",
+            key="gc_email_box"
+        )
+        st.session_state.group_email_input = email_input
+
+    with gc_col2:
+        st.markdown("""
+        <div class="upload-card">
+          <div class="upload-card-label">Student List CSV</div>
+          <div class="upload-card-desc">The same student list CSV from Seqta — used to look up student codes from email addresses.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        gc_csv = st.file_uploader(
+            "Student List CSV for group creator",
+            type="csv",
+            label_visibility="collapsed",
+            key="gc_csv_uploader"
+        )
+        # If the booklet CSV is already loaded, offer to reuse it
+        if gc_csv is None and "df_final" in st.session_state:
+            st.caption("💡 A student list is already loaded from the Booklet Creator — it will be used automatically if no file is uploaded here.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    run_gc = st.button("🔍  Find Student Codes", type="primary", key="gc_run_btn")
+
+    if run_gc:
+        # ── Parse emails ─────────────────────────────────────────────────────
+        raw_text = st.session_state.group_email_input.strip()
+        if not raw_text:
+            st.warning("Please paste at least one email address.")
+        else:
+            # Split on any combination of: commas, semicolons, pipes, spaces, newlines, tabs
+            emails_raw = re.split(r'[\s,;|\t]+', raw_text)
+            # Keep only strings that look like email addresses
+            email_pattern = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+            emails = [e.strip().lower() for e in emails_raw if email_pattern.match(e.strip())]
+            invalid = [e.strip() for e in emails_raw if e.strip() and not email_pattern.match(e.strip())]
+
+            if not emails:
+                st.error("No valid email addresses found. Please check your input.")
+            else:
+                # ── Load student data ─────────────────────────────────────────
+                df_gc = None
+
+                if gc_csv is not None:
+                    try:
+                        gc_csv.seek(0)
+                        df_gc = pd.read_csv(gc_csv).fillna("")
+                    except Exception as e:
+                        st.error(f"Could not read uploaded CSV: {e}")
+
+                elif "df_final" in st.session_state:
+                    df_gc = st.session_state.df_final
+
+                if df_gc is None:
+                    st.warning("Please upload a Student List CSV (or load one via the Booklet Creator tab first).")
+                else:
+                    # ── Build email → student_id lookup ──────────────────────
+                    # Look for an email column — try common names
+                    email_col = None
+                    for candidate in ["Email", "email", "Email address", "Email Address",
+                                      "Student email", "Student Email", "EmailAddress"]:
+                        if candidate in df_gc.columns:
+                            email_col = candidate
+                            break
+                    # Fallback: find any column whose name contains "email" (case-insensitive)
+                    if email_col is None:
+                        for col in df_gc.columns:
+                            if "email" in col.lower():
+                                email_col = col
+                                break
+
+                    id_col = COLS.get('student_id', 'Code')
+                    fname_col = COLS.get('first_name', 'First name')
+                    sname_col = COLS.get('surname', 'Surname')
+
+                    matched_ids = []
+                    matched_details = []  # (email, id, name)
+                    unmatched_emails = []
+                    no_email_col = email_col is None
+
+                    if not no_email_col:
+                        # Build a lookup dict: normalised_email → (student_id, name)
+                        lookup = {}
+                        for _, row in df_gc.iterrows():
+                            raw_email = str(row.get(email_col, "")).strip().lower()
+                            if raw_email and raw_email != 'nan':
+                                sid = str(row.get(id_col, "")).strip()
+                                fname = str(row.get(fname_col, "")).strip()
+                                sname = str(row.get(sname_col, "")).strip()
+                                full_name = f"{fname} {sname}".strip()
+                                lookup[raw_email] = (sid, full_name)
+
+                        for email in emails:
+                            if email in lookup:
+                                sid, name = lookup[email]
+                                matched_ids.append(sid)
+                                matched_details.append((email, sid, name))
+                            else:
+                                unmatched_emails.append(email)
+                    else:
+                        unmatched_emails = emails
+
+                    # ── Store results ─────────────────────────────────────────
+                    st.session_state.group_results = {
+                        "matched_ids": matched_ids,
+                        "matched_details": matched_details,
+                        "unmatched_emails": unmatched_emails,
+                        "invalid_tokens": invalid,
+                        "no_email_col": no_email_col,
+                        "email_col_used": email_col,
+                    }
+                    st.rerun()
+
+    # ── Display results ───────────────────────────────────────────────────────
+    if st.session_state.group_results:
+        res = st.session_state.group_results
+        matched_ids    = res["matched_ids"]
+        matched_details = res["matched_details"]
+        unmatched_emails = res["unmatched_emails"]
+        invalid_tokens = res["invalid_tokens"]
+        no_email_col   = res["no_email_col"]
+
+        st.markdown("---")
+
+        if no_email_col:
+            st.error(
+                "⚠️ No email column was found in the student CSV. "
+                "The CSV needs a column with 'email' in the name (e.g. 'Email', 'Email address'). "
+                "Check your export settings in SEQTA."
+            )
+        else:
+            result_col1, result_col2 = st.columns([3, 2])
+
+            with result_col1:
+                if matched_ids:
+                    st.markdown(f'<div class="group-output-label">✅ {len(matched_ids)} student code{"s" if len(matched_ids) != 1 else ""} found — copy and paste into SEQTA</div>', unsafe_allow_html=True)
+                    codes_text = "\n".join(matched_ids)
+                    st.text_area(
+                        "Student codes output",
+                        value=codes_text,
+                        height=max(120, min(400, len(matched_ids) * 26)),
+                        label_visibility="collapsed",
+                        key="gc_output_box"
+                    )
+                    st.markdown("""
+                    <div class="seqta-instruction">
+                      <strong>📌 Next step:</strong> In SEQTA, open your custom group editor,
+                      paste these codes one per line into the box on the left, then click <strong>OK</strong>.
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.info("No student codes were matched. Check the emails and CSV below.")
+
+            with result_col2:
+                if matched_details:
+                    with st.expander(f"✅ {len(matched_details)} matched", expanded=False):
+                        for email, sid, name in matched_details:
+                            st.markdown(f"<span style='font-size:0.8rem'><b>{sid}</b> — {name}<br><span style='color:#9295a8'>{email}</span></span>", unsafe_allow_html=True)
+
+                if unmatched_emails:
+                    with st.expander(f"❌ {len(unmatched_emails)} email{'s' if len(unmatched_emails) != 1 else ''} not matched", expanded=True):
+                        st.caption("These emails were not found in the student list CSV.")
+                        for em in unmatched_emails:
+                            st.markdown(f"<span style='font-size:0.8rem;color:#c0392b'>{em}</span>", unsafe_allow_html=True)
+
+                if invalid_tokens:
+                    with st.expander(f"⚠️ {len(invalid_tokens)} invalid token{'s' if len(invalid_tokens) != 1 else ''} skipped"):
+                        st.caption("These entries didn't look like email addresses and were ignored.")
+                        for tok in invalid_tokens:
+                            st.markdown(f"<span style='font-size:0.8rem;color:#9295a8'>{tok}</span>", unsafe_allow_html=True)
+
+        if st.button("↩  Clear results", key="gc_clear_btn"):
+            st.session_state.group_results = None
+            st.session_state.group_email_input = ""
+            st.rerun()
+
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="mbc-footer">
-  Medical Booklet Creator &nbsp;·&nbsp; Created by Thomas van Sant
+  School Tools &nbsp;·&nbsp; Created by Thomas van Sant
 </div>
 """, unsafe_allow_html=True)
