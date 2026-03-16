@@ -77,9 +77,9 @@ TEMP_DIR = os.path.join(BASE_DIR, "_temp")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
 st.set_page_config(
-    page_title="School Tools",
+    page_title="Medical Booklet Tools",
     layout="wide",
-    page_icon="🏫",
+    page_icon="📋",
     menu_items={
         "Get help": None,
         "Report a bug": None,
@@ -1614,7 +1614,61 @@ st.markdown("""
     font-size: 0.75rem; color: #b0b3c4;
   }
 
-  /* ── Streamlit overrides ── */
+  /* ── Card buttons — make entire card the button ── */
+  div[data-testid="stVerticalBlock"] .feature-btn-wrap > div > button {
+    all: unset !important;
+    display: block !important;
+    width: 100% !important;
+    background: #ffffff !important;
+    border: 2px solid #e2e5ee !important;
+    border-radius: 14px !important;
+    padding: 28px 24px !important;
+    text-align: center !important;
+    cursor: pointer !important;
+    transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s !important;
+    color: #1a1d2e !important;
+    font-size: 0.95rem !important;
+    line-height: 1.5 !important;
+    box-sizing: border-box !important;
+    height: auto !important;
+    min-height: 180px !important;
+    white-space: pre-wrap !important;
+  }
+  div[data-testid="stVerticalBlock"] .feature-btn-wrap > div > button:hover {
+    border-color: #1a7f6e !important;
+    box-shadow: 0 4px 20px rgba(26,127,110,0.13) !important;
+    transform: translateY(-2px) !important;
+  }
+  div[data-testid="stVerticalBlock"] .feature-btn-wrap > div > button:focus {
+    border-color: #1a7f6e !important;
+    box-shadow: 0 0 0 3px rgba(26,127,110,0.18) !important;
+    outline: none !important;
+  }
+</style>""", unsafe_allow_html=True)
+
+# ── Dynamic tab visibility based on active feature ────────────────────────────
+_feature = st.session_state.get("active_feature", None)
+if _feature == "booklet":
+    # Show: Home(1), Booklet Setup(2), Process(3) — hide Group(4)
+    _tab_css = """
+    [data-testid="stTabs"] [role="tablist"] > div:nth-child(4) { display: none !important; }
+    """
+elif _feature == "group":
+    # Show: Home(1), Group(4) — hide Booklet Setup(2), Process(3)
+    _tab_css = """
+    [data-testid="stTabs"] [role="tablist"] > div:nth-child(2) { display: none !important; }
+    [data-testid="stTabs"] [role="tablist"] > div:nth-child(3) { display: none !important; }
+    """
+else:
+    # Home only — hide all feature tabs
+    _tab_css = """
+    [data-testid="stTabs"] [role="tablist"] > div:nth-child(2) { display: none !important; }
+    [data-testid="stTabs"] [role="tablist"] > div:nth-child(3) { display: none !important; }
+    [data-testid="stTabs"] [role="tablist"] > div:nth-child(4) { display: none !important; }
+    """
+st.markdown(f"<style>{_tab_css}</style>", unsafe_allow_html=True)
+
+st.markdown("""<style>
   [data-testid="stFileUploader"] { background: #fafcfb; border-radius: 8px; }
   div[data-testid="stCheckbox"] label { font-size: 0.88rem !important; }
   div[data-testid="stSelectbox"] label { font-size: 0.88rem !important; }
@@ -1644,13 +1698,7 @@ st.markdown("""
     border-radius: 14px;
     padding: 28px 24px;
     text-align: center;
-    cursor: pointer;
     transition: border-color 0.18s, box-shadow 0.18s, transform 0.12s;
-  }
-  .feature-card:hover {
-    border-color: #1a7f6e;
-    box-shadow: 0 4px 20px rgba(26,127,110,0.12);
-    transform: translateY(-2px);
   }
   .feature-card-icon { font-size: 2.6rem; margin-bottom: 12px; }
   .feature-card-title {
@@ -1796,7 +1844,7 @@ st.markdown("""
 
 _h1, _h2 = st.columns([11, 1])
 with _h1:
-    st.markdown("**🏫 School Tools**")
+    st.markdown("**📋 Medical Booklet Tools**")
     st.caption("Created by Thomas van Sant")
 with _h2:
     with st.popover("•••"):
@@ -1886,38 +1934,34 @@ if st.session_state.get("_go_group"):
 with t0:
     st.markdown("<br>", unsafe_allow_html=True)
     st.markdown("### What would you like to do?")
-    st.markdown("Choose a feature below to get started.", unsafe_allow_html=True)
+    st.markdown("Choose a tool below to get started.")
     st.markdown("<br>", unsafe_allow_html=True)
 
     home_col1, home_col2 = st.columns(2)
 
     with home_col1:
-        st.markdown("""
-        <div class="feature-card">
-          <div class="feature-card-icon">📋</div>
-          <div class="feature-card-title">Medical Booklet Creator</div>
-          <div class="feature-card-desc">Generate student medical profile PDFs for excursions and field activities — medical info, emergency contacts, swimming ability, dietary requirements and more.</div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown("<br style='margin-top:-8px'>", unsafe_allow_html=True)
-        if st.button("Open Booklet Creator →", use_container_width=True, type="primary", key="home_booklet_btn"):
+        st.markdown('<div class="feature-btn-wrap">', unsafe_allow_html=True)
+        if st.button(
+            "📋\n\nMedical Booklet Creator\n\nGenerate student medical profile PDFs for excursions — medical info, emergency contacts, swimming ability, dietary requirements and more.\n\n→ Open Booklet Creator",
+            use_container_width=True,
+            key="home_booklet_btn"
+        ):
             st.session_state.active_feature = 'booklet'
             st.session_state._go_setup = True
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
     with home_col2:
-        st.markdown("""
-        <div class="feature-card">
-          <div class="feature-card-icon">👥</div>
-          <div class="feature-card-title">SEQTA Group Creator</div>
-          <div class="feature-card-desc">Paste a list of student email addresses and the app will look up their student codes — ready to paste straight into SEQTA to create a custom group.</div>
-        </div>
-        """, unsafe_allow_html=True)
-        st.markdown("<br style='margin-top:-8px'>", unsafe_allow_html=True)
-        if st.button("Open Group Creator →", use_container_width=True, key="home_group_btn"):
+        st.markdown('<div class="feature-btn-wrap">', unsafe_allow_html=True)
+        if st.button(
+            "👥\n\nSEQTA Group Creator\n\nPaste student email addresses and the app looks up their student codes — ready to paste into SEQTA to create a custom group.\n\n→ Open Group Creator",
+            use_container_width=True,
+            key="home_group_btn"
+        ):
             st.session_state.active_feature = 'group'
             st.session_state._go_group = True
             st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 1 — SETUP
@@ -2068,658 +2112,659 @@ with t2:
 
     if "df_final" not in st.session_state or "photo_pdf" not in st.session_state:
         st.info("Upload a Student List CSV and Photos PDF in the Setup tab first.")
-        st.stop()
 
-    df_final = st.session_state.df_final
-    photo_pdf_path = st.session_state.photo_pdf
 
-    # ── Step 1: Analyse ───────────────────────────────────────────────────────
-    st.markdown('<div class="section-head">Step 1 — Analyse photos</div>', unsafe_allow_html=True)
+    if "df_final" in st.session_state and "photo_pdf" in st.session_state:
+        df_final = st.session_state.df_final
+        photo_pdf_path = st.session_state.photo_pdf
 
-    if st.button("Scan & Match Photos", type="primary"):
-        with st.spinner("Scanning PDF and matching photos to students…"):
-            results, unmatched = extract_photos_geometric(photo_pdf_path, df_final)
-            st.session_state.auto_matches = results
-            st.session_state.unmatched_data = unmatched
-            st.session_state.extraction_done = True
-            st.session_state.manual_selections = {}
-            st.session_state.detected_plans = detect_medical_plans(df_final)
+        # ── Step 1: Analyse ───────────────────────────────────────────────────────
+        st.markdown('<div class="section-head">Step 1 — Analyse photos</div>', unsafe_allow_html=True)
 
+        if st.button("Scan & Match Photos", type="primary"):
+            with st.spinner("Scanning PDF and matching photos to students…"):
+                results, unmatched = extract_photos_geometric(photo_pdf_path, df_final)
+                st.session_state.auto_matches = results
+                st.session_state.unmatched_data = unmatched
+                st.session_state.extraction_done = True
+                st.session_state.manual_selections = {}
+                st.session_state.detected_plans = detect_medical_plans(df_final)
+
+                if 'swimming_csv' in st.session_state:
+                    contact_data = st.session_state.get('contact_csv_df', None)
+                    swim_matched, swim_unmatched = match_swimming_ability(df_final, st.session_state.swimming_csv, contact_data)
+                    st.session_state.swimming_matched = swim_matched
+                    st.session_state.swimming_unmatched = swim_unmatched
+                    st.session_state.swimming_manual_selections = {}
+
+                if 'dietary_csv' in st.session_state:
+                    dietary_matched, dietary_unmatched = match_dietary_requirements(df_final, st.session_state.dietary_csv)
+                    st.session_state.dietary_matched = dietary_matched
+                    st.session_state.dietary_unmatched = dietary_unmatched
+                    st.session_state.dietary_manual_selections = {}
+
+                if 'photo_perm_csv' in st.session_state:
+                    perm_map = match_photo_permissions(df_final, st.session_state.photo_perm_csv)
+                    st.session_state.photo_permissions_map = perm_map
+
+                st.rerun()
+
+        if st.session_state.get("extraction_done", False):
+
+            # ── Step 2: Review photos ─────────────────────────────────────────────
+            st.markdown('<div class="section-head">Step 2 — Review matches</div>', unsafe_allow_html=True)
+
+            student_options = ["(Skip)"]
+            name_to_id_map = {}
+            id_to_name_map = {}
+            for _, row in df_final.iterrows():
+                sid = str(row[COLS['student_id']])
+                label = f"{row[COLS['surname']]}, {row[COLS['first_name']]} ({sid})"
+                student_options.append(label)
+                name_to_id_map[label] = sid
+                id_to_name_map[sid] = f"{row[COLS['first_name']]} {row[COLS['surname']]}"
+
+            # Photos
+            n_auto = len(st.session_state.auto_matches)
+            n_unmatched = len(st.session_state.unmatched_data)
+            if n_unmatched > 0:
+                with st.expander(f"⚠️  {n_unmatched} photos need manual matching  ({n_auto} matched automatically)", expanded=True):
+                    for item in st.session_state.unmatched_data:
+                        c1, c2 = st.columns([1, 4])
+                        with c1: st.image(item['path'], width=90)
+                        with c2:
+                            st.caption(f"Page {item['page']} · Text nearby: *{item['text_found']}*")
+                            sel = st.selectbox("Assign to student:", options=student_options, key=f"select_{item['path']}")
+                            if sel != "(Skip)":
+                                st.session_state.manual_selections[item['path']] = name_to_id_map[sel]
+                            elif item['path'] in st.session_state.manual_selections:
+                                del st.session_state.manual_selections[item['path']]
+                        st.divider()
+            else:
+                st.success(f"✅ All {n_auto} photos matched automatically")
+
+            # Swimming
             if 'swimming_csv' in st.session_state:
-                contact_data = st.session_state.get('contact_csv_df', None)
-                swim_matched, swim_unmatched = match_swimming_ability(df_final, st.session_state.swimming_csv, contact_data)
-                st.session_state.swimming_matched = swim_matched
-                st.session_state.swimming_unmatched = swim_unmatched
-                st.session_state.swimming_manual_selections = {}
-
-            if 'dietary_csv' in st.session_state:
-                dietary_matched, dietary_unmatched = match_dietary_requirements(df_final, st.session_state.dietary_csv)
-                st.session_state.dietary_matched = dietary_matched
-                st.session_state.dietary_unmatched = dietary_unmatched
-                st.session_state.dietary_manual_selections = {}
-
-            if 'photo_perm_csv' in st.session_state:
-                perm_map = match_photo_permissions(df_final, st.session_state.photo_perm_csv)
-                st.session_state.photo_permissions_map = perm_map
-
-            st.rerun()
-
-    if st.session_state.get("extraction_done", False):
-
-        # ── Step 2: Review photos ─────────────────────────────────────────────
-        st.markdown('<div class="section-head">Step 2 — Review matches</div>', unsafe_allow_html=True)
-
-        student_options = ["(Skip)"]
-        name_to_id_map = {}
-        id_to_name_map = {}
-        for _, row in df_final.iterrows():
-            sid = str(row[COLS['student_id']])
-            label = f"{row[COLS['surname']]}, {row[COLS['first_name']]} ({sid})"
-            student_options.append(label)
-            name_to_id_map[label] = sid
-            id_to_name_map[sid] = f"{row[COLS['first_name']]} {row[COLS['surname']]}"
-
-        # Photos
-        n_auto = len(st.session_state.auto_matches)
-        n_unmatched = len(st.session_state.unmatched_data)
-        if n_unmatched > 0:
-            with st.expander(f"⚠️  {n_unmatched} photos need manual matching  ({n_auto} matched automatically)", expanded=True):
-                for item in st.session_state.unmatched_data:
-                    c1, c2 = st.columns([1, 4])
-                    with c1: st.image(item['path'], width=90)
-                    with c2:
-                        st.caption(f"Page {item['page']} · Text nearby: *{item['text_found']}*")
-                        sel = st.selectbox("Assign to student:", options=student_options, key=f"select_{item['path']}")
-                        if sel != "(Skip)":
-                            st.session_state.manual_selections[item['path']] = name_to_id_map[sel]
-                        elif item['path'] in st.session_state.manual_selections:
-                            del st.session_state.manual_selections[item['path']]
-                    st.divider()
-        else:
-            st.success(f"✅ All {n_auto} photos matched automatically")
-
-        # Swimming
-        if 'swimming_csv' in st.session_state:
-            total_swim_matched = len(st.session_state.get('swimming_matched', {}))
-            total_swim_unmatched = len(st.session_state.get('swimming_unmatched', []))
-            if total_swim_unmatched > 0:
-                with st.expander(f"⚠️  {total_swim_unmatched} swimming records need manual matching", expanded=True):
-                    st.caption("These records couldn't be matched automatically — please assign them below.")
-                    for item in st.session_state.swimming_unmatched:
-                        c1, c2 = st.columns([1, 3])
-                        with c1:
-                            st.markdown(f"**{item['student_name']}**")
-                        with c2:
-                            color_map = {'swim-cannot': '🔴', 'swim-weak': '🟠', 'swim-ok': '🟢', 'swim-none': '⚪'}
-                            ability_color = get_swimming_display_color(item['ability'])
-                            st.markdown(f"{color_map.get(ability_color, '⚪')} {item['ability']}")
-                            sel = st.selectbox("Assign to student:", options=student_options, key=f"swim_select_{item['index']}")
-                            if sel != "(Skip)":
-                                st.session_state.swimming_manual_selections[item['index']] = name_to_id_map[sel]
-                            elif item['index'] in st.session_state.swimming_manual_selections:
-                                del st.session_state.swimming_manual_selections[item['index']]
-                        st.divider()
-            else:
-                st.success(f"✅ All {total_swim_matched} swimming records matched automatically")
-
-        # Dietary
-        if 'dietary_csv' in st.session_state:
-            total_diet_matched = len(st.session_state.get('dietary_matched', {}))
-            total_diet_unmatched = len(st.session_state.get('dietary_unmatched', []))
-            if total_diet_unmatched > 0:
-                with st.expander(f"⚠️  {total_diet_unmatched} dietary records need manual matching", expanded=True):
-                    st.caption("These records couldn't be matched automatically — please assign them below.")
-                    for item in st.session_state.dietary_unmatched:
-                        c1, c2 = st.columns([1, 3])
-                        with c1:
-                            st.markdown(f"**{item['student_name']}**")
-                        with c2:
-                            preview = item['dietary_req'][:100] + "…" if len(item['dietary_req']) > 100 else item['dietary_req']
-                            st.markdown(f"🍽️ {preview}")
-                            sel = st.selectbox("Assign to student:", options=student_options, key=f"dietary_select_{item['index']}")
-                            if sel != "(Skip)":
-                                st.session_state.dietary_manual_selections[item['index']] = name_to_id_map[sel]
-                            elif item['index'] in st.session_state.dietary_manual_selections:
-                                del st.session_state.dietary_manual_selections[item['index']]
-                        st.divider()
-            else:
-                st.success(f"✅ All {total_diet_matched} dietary records matched automatically")
-
-        # Photo permissions summary
-        if 'photo_perm_csv' in st.session_state:
-            perm_map = st.session_state.get('photo_permissions_map', {})
-            no_count = sum(1 for v in perm_map.values() if v == 'No')
-            nr_count = sum(1 for v in perm_map.values() if v == 'No Response')
-            yes_count = sum(1 for v in perm_map.values() if v == 'Yes')
-            if no_count + nr_count > 0:
-                st.warning(f"📷 Photo Permissions: {yes_count} Yes · {no_count} No · {nr_count} No Response")
-            else:
-                st.success(f"✅ Photo Permissions: All {yes_count} students have given permission")
-
-        # ── Step 3: Medical plans ─────────────────────────────────────────────
-        st.markdown('<div class="section-head">Step 3 — Medical action plans</div>', unsafe_allow_html=True)
-
-        detected = st.session_state.get('detected_plans', {})
-
-        # ── Advanced Options (session cookie + auto-download) ─────────────────
-        if detected:
-            with st.expander("⚙️ Advanced Options — Auto-download plans"):
-                st.markdown("**Auto-download all plans using your portal session**")
-                st.caption(
-                    "This uses your existing browser login to download action plans automatically. "
-                    "Your credentials are never stored — only the temporary session value is used."
-                )
-
-                # Cookie name hint (Synweb/Seqta typically uses one of these)
-                PORTAL_HOST = CONFIG['app_settings'].get('school_portal_url', '')
-                portal_domain = PORTAL_HOST.replace("https://", "").replace("http://", "").split("/")[0]
-
-                st.markdown("**How to get your session cookie:**")
-                st.markdown(f"""
-1. Log into [{portal_domain}]({PORTAL_HOST}) in Chrome or Safari as normal
-2. Press **F12** to open DevTools (or right-click anywhere → **Inspect**)
-3. Click the **Application** tab (Chrome) or **Storage** tab (Safari)
-4. In the left panel: **Cookies** → click `{portal_domain}`
-5. Find the cookie named **`ASP.NET_SessionId`** (or `SEQTASESSION`)
-6. Click it and copy the **Value** column
-7. Paste it below
-""")
-                st.info("💡 The cookie expires when you log out of the portal. If auto-download fails, log back in and copy a fresh value.", icon="ℹ️")
-
-                col_cookie, col_name = st.columns([3, 1])
-                with col_cookie:
-                    cookie_val = st.text_input(
-                        "Session cookie value",
-                        value=st.session_state.get("_portal_cookie", ""),
-                        type="password",
-                        placeholder="Paste cookie value here…",
-                        key="portal_cookie_input"
-                    )
-                with col_name:
-                    cookie_name = st.text_input(
-                        "Cookie name",
-                        value=st.session_state.get("_portal_cookie_name", "ASP.NET_SessionId"),
-                        placeholder="ASP.NET_SessionId",
-                        key="portal_cookie_name_input"
-                    )
-
-                if cookie_val:
-                    st.session_state["_portal_cookie"] = cookie_val
-                if cookie_name:
-                    st.session_state["_portal_cookie_name"] = cookie_name
-
-                n_plans_total = sum(len(plans) for plans in detected.values())
-                btn_label = f"⬇ Auto-download all {n_plans_total} plan{'s' if n_plans_total != 1 else ''}"
-
-                if not cookie_val:
-                    st.button(btn_label, disabled=True, help="Paste your session cookie above first")
+                total_swim_matched = len(st.session_state.get('swimming_matched', {}))
+                total_swim_unmatched = len(st.session_state.get('swimming_unmatched', []))
+                if total_swim_unmatched > 0:
+                    with st.expander(f"⚠️  {total_swim_unmatched} swimming records need manual matching", expanded=True):
+                        st.caption("These records couldn't be matched automatically — please assign them below.")
+                        for item in st.session_state.swimming_unmatched:
+                            c1, c2 = st.columns([1, 3])
+                            with c1:
+                                st.markdown(f"**{item['student_name']}**")
+                            with c2:
+                                color_map = {'swim-cannot': '🔴', 'swim-weak': '🟠', 'swim-ok': '🟢', 'swim-none': '⚪'}
+                                ability_color = get_swimming_display_color(item['ability'])
+                                st.markdown(f"{color_map.get(ability_color, '⚪')} {item['ability']}")
+                                sel = st.selectbox("Assign to student:", options=student_options, key=f"swim_select_{item['index']}")
+                                if sel != "(Skip)":
+                                    st.session_state.swimming_manual_selections[item['index']] = name_to_id_map[sel]
+                                elif item['index'] in st.session_state.swimming_manual_selections:
+                                    del st.session_state.swimming_manual_selections[item['index']]
+                            st.divider()
                 else:
-                    if st.button(btn_label, type="primary"):
-                        if "auto_downloaded_plans" not in st.session_state:
-                            st.session_state.auto_downloaded_plans = {}
+                    st.success(f"✅ All {total_swim_matched} swimming records matched automatically")
 
-                        download_results = []
-                        prog_bar = st.progress(0)
-                        total_plans = n_plans_total
-                        done = 0
+            # Dietary
+            if 'dietary_csv' in st.session_state:
+                total_diet_matched = len(st.session_state.get('dietary_matched', {}))
+                total_diet_unmatched = len(st.session_state.get('dietary_unmatched', []))
+                if total_diet_unmatched > 0:
+                    with st.expander(f"⚠️  {total_diet_unmatched} dietary records need manual matching", expanded=True):
+                        st.caption("These records couldn't be matched automatically — please assign them below.")
+                        for item in st.session_state.dietary_unmatched:
+                            c1, c2 = st.columns([1, 3])
+                            with c1:
+                                st.markdown(f"**{item['student_name']}**")
+                            with c2:
+                                preview = item['dietary_req'][:100] + "…" if len(item['dietary_req']) > 100 else item['dietary_req']
+                                st.markdown(f"🍽️ {preview}")
+                                sel = st.selectbox("Assign to student:", options=student_options, key=f"dietary_select_{item['index']}")
+                                if sel != "(Skip)":
+                                    st.session_state.dietary_manual_selections[item['index']] = name_to_id_map[sel]
+                                elif item['index'] in st.session_state.dietary_manual_selections:
+                                    del st.session_state.dietary_manual_selections[item['index']]
+                            st.divider()
+                else:
+                    st.success(f"✅ All {total_diet_matched} dietary records matched automatically")
 
-                        for sid, plans in detected.items():
-                            s_name = id_to_name_map.get(sid, sid)
-                            for p_idx, plan in enumerate(plans):
-                                url = plan.get('url')
-                                if not url:
-                                    download_results.append((s_name, plan['condition'], False, "No URL available"))
+            # Photo permissions summary
+            if 'photo_perm_csv' in st.session_state:
+                perm_map = st.session_state.get('photo_permissions_map', {})
+                no_count = sum(1 for v in perm_map.values() if v == 'No')
+                nr_count = sum(1 for v in perm_map.values() if v == 'No Response')
+                yes_count = sum(1 for v in perm_map.values() if v == 'Yes')
+                if no_count + nr_count > 0:
+                    st.warning(f"📷 Photo Permissions: {yes_count} Yes · {no_count} No · {nr_count} No Response")
+                else:
+                    st.success(f"✅ Photo Permissions: All {yes_count} students have given permission")
+
+            # ── Step 3: Medical plans ─────────────────────────────────────────────
+            st.markdown('<div class="section-head">Step 3 — Medical action plans</div>', unsafe_allow_html=True)
+
+            detected = st.session_state.get('detected_plans', {})
+
+            # ── Advanced Options (session cookie + auto-download) ─────────────────
+            if detected:
+                with st.expander("⚙️ Advanced Options — Auto-download plans"):
+                    st.markdown("**Auto-download all plans using your portal session**")
+                    st.caption(
+                        "This uses your existing browser login to download action plans automatically. "
+                        "Your credentials are never stored — only the temporary session value is used."
+                    )
+
+                    # Cookie name hint (Synweb/Seqta typically uses one of these)
+                    PORTAL_HOST = CONFIG['app_settings'].get('school_portal_url', '')
+                    portal_domain = PORTAL_HOST.replace("https://", "").replace("http://", "").split("/")[0]
+
+                    st.markdown("**How to get your session cookie:**")
+                    st.markdown(f"""
+    1. Log into [{portal_domain}]({PORTAL_HOST}) in Chrome or Safari as normal
+    2. Press **F12** to open DevTools (or right-click anywhere → **Inspect**)
+    3. Click the **Application** tab (Chrome) or **Storage** tab (Safari)
+    4. In the left panel: **Cookies** → click `{portal_domain}`
+    5. Find the cookie named **`ASP.NET_SessionId`** (or `SEQTASESSION`)
+    6. Click it and copy the **Value** column
+    7. Paste it below
+    """)
+                    st.info("💡 The cookie expires when you log out of the portal. If auto-download fails, log back in and copy a fresh value.", icon="ℹ️")
+
+                    col_cookie, col_name = st.columns([3, 1])
+                    with col_cookie:
+                        cookie_val = st.text_input(
+                            "Session cookie value",
+                            value=st.session_state.get("_portal_cookie", ""),
+                            type="password",
+                            placeholder="Paste cookie value here…",
+                            key="portal_cookie_input"
+                        )
+                    with col_name:
+                        cookie_name = st.text_input(
+                            "Cookie name",
+                            value=st.session_state.get("_portal_cookie_name", "ASP.NET_SessionId"),
+                            placeholder="ASP.NET_SessionId",
+                            key="portal_cookie_name_input"
+                        )
+
+                    if cookie_val:
+                        st.session_state["_portal_cookie"] = cookie_val
+                    if cookie_name:
+                        st.session_state["_portal_cookie_name"] = cookie_name
+
+                    n_plans_total = sum(len(plans) for plans in detected.values())
+                    btn_label = f"⬇ Auto-download all {n_plans_total} plan{'s' if n_plans_total != 1 else ''}"
+
+                    if not cookie_val:
+                        st.button(btn_label, disabled=True, help="Paste your session cookie above first")
+                    else:
+                        if st.button(btn_label, type="primary"):
+                            if "auto_downloaded_plans" not in st.session_state:
+                                st.session_state.auto_downloaded_plans = {}
+
+                            download_results = []
+                            prog_bar = st.progress(0)
+                            total_plans = n_plans_total
+                            done = 0
+
+                            for sid, plans in detected.items():
+                                s_name = id_to_name_map.get(sid, sid)
+                                for p_idx, plan in enumerate(plans):
+                                    url = plan.get('url')
+                                    if not url:
+                                        download_results.append((s_name, plan['condition'], False, "No URL available"))
+                                        done += 1
+                                        prog_bar.progress(done / total_plans)
+                                        continue
+
+                                    file_obj, filename, error = auto_download_plan(
+                                        url,
+                                        cookie_val,
+                                        cookie_name=cookie_name or "ASP.NET_SessionId"
+                                    )
+
+                                    if file_obj:
+                                        # Store raw bytes + filename as a plain tuple so they
+                                        # survive st.rerun() serialisation. BytesIO objects are
+                                        # not reliably preserved across reruns in session_state.
+                                        plan_key = f"{sid}_{p_idx}"
+                                        if "auto_downloaded_plan_files" not in st.session_state:
+                                            st.session_state.auto_downloaded_plan_files = {}
+                                        file_obj.seek(0)
+                                        st.session_state.auto_downloaded_plan_files[plan_key] = (file_obj.read(), filename)
+                                        st.session_state.auto_downloaded_plans[plan_key] = {
+                                            "filename": filename, "sid": sid, "condition": plan['condition']
+                                        }
+                                        download_results.append((s_name, plan['condition'], True, filename))
+                                    else:
+                                        download_results.append((s_name, plan['condition'], False, error))
+
                                     done += 1
                                     prog_bar.progress(done / total_plans)
-                                    continue
 
-                                file_obj, filename, error = auto_download_plan(
-                                    url,
-                                    cookie_val,
-                                    cookie_name=cookie_name or "ASP.NET_SessionId"
-                                )
+                            prog_bar.empty()
 
-                                if file_obj:
-                                    # Store raw bytes + filename as a plain tuple so they
-                                    # survive st.rerun() serialisation. BytesIO objects are
-                                    # not reliably preserved across reruns in session_state.
-                                    plan_key = f"{sid}_{p_idx}"
-                                    if "auto_downloaded_plan_files" not in st.session_state:
-                                        st.session_state.auto_downloaded_plan_files = {}
-                                    file_obj.seek(0)
-                                    st.session_state.auto_downloaded_plan_files[plan_key] = (file_obj.read(), filename)
-                                    st.session_state.auto_downloaded_plans[plan_key] = {
-                                        "filename": filename, "sid": sid, "condition": plan['condition']
-                                    }
-                                    download_results.append((s_name, plan['condition'], True, filename))
-                                else:
-                                    download_results.append((s_name, plan['condition'], False, error))
+                            # Show results summary
+                            successes = [r for r in download_results if r[2]]
+                            failures  = [r for r in download_results if not r[2]]
 
-                                done += 1
-                                prog_bar.progress(done / total_plans)
+                            if successes:
+                                st.success(f"✅ Downloaded {len(successes)} of {total_plans} plans successfully")
+                            if failures:
+                                st.warning(f"⚠️ {len(failures)} plan{'s' if len(failures) != 1 else ''} could not be downloaded:")
+                                for s_name, condition, _, reason in failures:
+                                    st.caption(f"• **{s_name}** — {condition}: {reason}")
 
-                        prog_bar.empty()
+                            if successes:
+                                st.rerun()
 
-                        # Show results summary
-                        successes = [r for r in download_results if r[2]]
-                        failures  = [r for r in download_results if not r[2]]
-
-                        if successes:
-                            st.success(f"✅ Downloaded {len(successes)} of {total_plans} plans successfully")
-                        if failures:
-                            st.warning(f"⚠️ {len(failures)} plan{'s' if len(failures) != 1 else ''} could not be downloaded:")
-                            for s_name, condition, _, reason in failures:
-                                st.caption(f"• **{s_name}** — {condition}: {reason}")
-
-                        if successes:
-                            st.rerun()
-
-        # ── Per-student plan list ─────────────────────────────────────────────
-        if "manual_plan_uploads" not in st.session_state:
-            st.session_state.manual_plan_uploads = {}
-
-        if detected:
-            for sid, plans in detected.items():
-                s_name = id_to_name_map.get(sid, sid)
-                with st.container():
-                    st.markdown(f"**{s_name}**")
-                    for p_idx, plan in enumerate(plans):
-                        col1, col2 = st.columns([3, 2])
-                        with col1:
-                            st.markdown(f"**{plan['condition']}**")
-                            if plan.get('url'):
-                                st.markdown(f"[↗ Open document]({plan['url']})")
-                            plan_key = f"{sid}_{p_idx}"
-                            ad = st.session_state.get("auto_downloaded_plans", {}).get(plan_key)
-                            if ad:
-                                st.caption(f"✅ Auto-downloaded: {ad['filename']}")
-                            elif st.session_state.manual_plan_uploads.get(plan_key):
-                                fname = st.session_state.manual_plan_uploads[plan_key][1]
-                                st.caption(f"✅ Uploaded: {fname}")
-                        with col2:
-                            upload_label = f"Upload {plan['condition']}"
-                            existing_key = f"plan_upload_{sid}_{p_idx}"
-                            plan_key = f"{sid}_{p_idx}"
-                            if st.session_state.get("auto_downloaded_plans", {}).get(plan_key):
-                                upload_label = f"Replace {plan['condition']} (auto-downloaded)"
-                            uploaded = st.file_uploader(upload_label, type=['pdf','png','jpg'], key=existing_key)
-                            # Cache uploaded file as raw bytes so it survives button-click reruns.
-                            # Only update the cache when a file is actually present — never clear it.
-                            if uploaded is not None:
-                                try:
-                                    uploaded.seek(0)
-                                    raw = uploaded.read()
-                                    if raw:  # only store if non-empty
-                                        st.session_state.manual_plan_uploads[plan_key] = (raw, uploaded.name)
-                                except Exception:
-                                    pass
-                    st.divider()
-        else:
-            st.caption("No action plans detected in student data.")
-
-        # Initialise the manual plans store
-        if "manual_plans_store" not in st.session_state:
-            st.session_state.manual_plans_store = []  # list of {'sid': ..., 'name': ..., 'file': ...}
-        if "_manual_plan_reset" not in st.session_state:
-            st.session_state._manual_plan_reset = 0
-
-        with st.expander("Add a plan manually", expanded=bool(st.session_state.manual_plans_store)):
-            st.caption("Select a student, upload a file, then click **Add Plan**. Repeat for each student.")
-
-            # Show already-added plans
-            if st.session_state.manual_plans_store:
-                st.markdown("**Plans queued:**")
-                to_remove = None
-                for i, entry in enumerate(st.session_state.manual_plans_store):
-                    c1, c2 = st.columns([6, 1])
-                    with c1:
-                        st.markdown(f"✅ **{entry['name']}** — {entry['file'].name}")
-                    with c2:
-                        if st.button("✕", key=f"remove_manual_plan_{i}", help="Remove this plan"):
-                            to_remove = i
-                if to_remove is not None:
-                    st.session_state.manual_plans_store.pop(to_remove)
-                    st.rerun()
-                st.divider()
-
-            # Use reset counter in key so widgets clear after Add Plan
-            reset_key = st.session_state._manual_plan_reset
-            man_sel = st.selectbox(
-                "Select student",
-                ["(Select a student)"] + sorted(list(name_to_id_map.keys())),
-                key=f"man_sel_{reset_key}"
-            )
-            man_file = st.file_uploader(
-                "Upload file",
-                type=['pdf', 'png', 'jpg'],
-                key=f"manual_plan_file_{reset_key}"
-            )
-
-            if st.button("Add Plan", key="add_manual_plan_btn", type="primary"):
-                if man_sel == "(Select a student)":
-                    st.warning("Please select a student first.")
-                elif man_file is None:
-                    st.warning("Please upload a file first.")
-                else:
-                    st.session_state.manual_plans_store.append({
-                        'sid': name_to_id_map[man_sel],
-                        'name': man_sel,
-                        'file': man_file
-                    })
-                    st.session_state._manual_plan_reset += 1
-                    st.rerun()
-
-        # ── Step 4: Content options ───────────────────────────────────────────
-        st.markdown('<div class="section-head">Step 4 — Content options</div>', unsafe_allow_html=True)
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown('<div class="options-card-title">Header details</div>', unsafe_allow_html=True)
-            opt_year  = st.checkbox("Year level",    value=True)
-            opt_roll  = st.checkbox("Roll group",    value=True)
-            opt_house = st.checkbox("House",         value=True)
-            opt_dob   = st.checkbox("Date of birth", value=True)
-            opt_tutor = st.checkbox("Tutor",         value=True)
-            opt_sid   = st.checkbox("Student ID",    value=True)
-
-            has_swimming     = 'swimming_csv' in st.session_state
-            has_dietary      = 'dietary_csv' in st.session_state
-            has_contact_csv  = 'contact_csv_df' in st.session_state
-            has_photo_perm   = 'photo_perm_csv' in st.session_state
-
-            if has_swimming or has_dietary or has_contact_csv or has_photo_perm:
-                st.markdown("---")
-                st.markdown('<div class="options-card-title">Additional data</div>', unsafe_allow_html=True)
-            opt_swimming   = st.checkbox("Swimming ability",      value=True) if has_swimming   else False
-            opt_dietary    = st.checkbox("Dietary requirements",  value=True) if has_dietary    else False
-            opt_sec_home   = st.checkbox("Home contacts",         value=True) if has_contact_csv else False
-            opt_photo_perm = st.checkbox("Photo permissions",     value=True) if has_photo_perm else False
-
-        with col2:
-            st.markdown('<div class="options-card-title">Profile sections</div>', unsafe_allow_html=True)
-            opt_sec_med   = st.checkbox("Medical information",         value=True)
-            opt_sec_emerg = st.checkbox("Emergency contacts",          value=True)
-            opt_sec_docs  = st.checkbox("Medical contacts (doctors)",  value=True)
-            opt_sec_learn = st.checkbox("Learning & support",          value=True)
-
-        # ── Step 5: Sort & output ─────────────────────────────────────────────
-        st.markdown('<div class="section-head">Step 5 — Sort & output</div>', unsafe_allow_html=True)
-
-        col3, col4 = st.columns(2)
-        with col3:
-            sort_by = st.selectbox("Sort students by:", ["Alphabetical (Surname)", "Roll Group", "House", "Year Level"])
-        with col4:
-            if sort_by == "Alphabetical (Surname)":
-                output_mode = "Single Document"
-                st.caption("Alphabetical sorting produces a single combined document.")
-            else:
-                output_mode = st.radio("Output:", ["Single Document", f"Split by {sort_by}"])
-
-        st.markdown("")
-
-        if st.button("Generate Medical Booklet", type="primary"):
-
-            # ── Gather plans ─────────────────────────────────────────────────
-            plan_map = {}
-            detected = st.session_state.get('detected_plans', {})
-            auto_files = st.session_state.get("auto_downloaded_plan_files", {})
-            manual_uploads = st.session_state.get("manual_plan_uploads", {})
+            # ── Per-student plan list ─────────────────────────────────────────────
+            if "manual_plan_uploads" not in st.session_state:
+                st.session_state.manual_plan_uploads = {}
 
             if detected:
                 for sid, plans in detected.items():
-                    for idx, _ in enumerate(plans):
-                        plan_key = f"{sid}_{idx}"
-                        widget_key = f"plan_upload_{sid}_{idx}"
+                    s_name = id_to_name_map.get(sid, sid)
+                    with st.container():
+                        st.markdown(f"**{s_name}**")
+                        for p_idx, plan in enumerate(plans):
+                            col1, col2 = st.columns([3, 2])
+                            with col1:
+                                st.markdown(f"**{plan['condition']}**")
+                                if plan.get('url'):
+                                    st.markdown(f"[↗ Open document]({plan['url']})")
+                                plan_key = f"{sid}_{p_idx}"
+                                ad = st.session_state.get("auto_downloaded_plans", {}).get(plan_key)
+                                if ad:
+                                    st.caption(f"✅ Auto-downloaded: {ad['filename']}")
+                                elif st.session_state.manual_plan_uploads.get(plan_key):
+                                    fname = st.session_state.manual_plan_uploads[plan_key][1]
+                                    st.caption(f"✅ Uploaded: {fname}")
+                            with col2:
+                                upload_label = f"Upload {plan['condition']}"
+                                existing_key = f"plan_upload_{sid}_{p_idx}"
+                                plan_key = f"{sid}_{p_idx}"
+                                if st.session_state.get("auto_downloaded_plans", {}).get(plan_key):
+                                    upload_label = f"Replace {plan['condition']} (auto-downloaded)"
+                                uploaded = st.file_uploader(upload_label, type=['pdf','png','jpg'], key=existing_key)
+                                # Cache uploaded file as raw bytes so it survives button-click reruns.
+                                # Only update the cache when a file is actually present — never clear it.
+                                if uploaded is not None:
+                                    try:
+                                        uploaded.seek(0)
+                                        raw = uploaded.read()
+                                        if raw:  # only store if non-empty
+                                            st.session_state.manual_plan_uploads[plan_key] = (raw, uploaded.name)
+                                    except Exception:
+                                        pass
+                        st.divider()
+            else:
+                st.caption("No action plans detected in student data.")
 
-                        # Priority 1: live widget value (present on same rerun as button click)
-                        live_file = st.session_state.get(widget_key)
-                        if live_file is not None:
-                            try:
-                                live_file.seek(0)
-                                raw = live_file.read()
-                                if raw:
-                                    # Also update the persistent cache while we have it
-                                    manual_uploads[plan_key] = (raw, live_file.name)
-                                    buf = BytesIO(raw)
-                                    buf.name = live_file.name
+            # Initialise the manual plans store
+            if "manual_plans_store" not in st.session_state:
+                st.session_state.manual_plans_store = []  # list of {'sid': ..., 'name': ..., 'file': ...}
+            if "_manual_plan_reset" not in st.session_state:
+                st.session_state._manual_plan_reset = 0
+
+            with st.expander("Add a plan manually", expanded=bool(st.session_state.manual_plans_store)):
+                st.caption("Select a student, upload a file, then click **Add Plan**. Repeat for each student.")
+
+                # Show already-added plans
+                if st.session_state.manual_plans_store:
+                    st.markdown("**Plans queued:**")
+                    to_remove = None
+                    for i, entry in enumerate(st.session_state.manual_plans_store):
+                        c1, c2 = st.columns([6, 1])
+                        with c1:
+                            st.markdown(f"✅ **{entry['name']}** — {entry['file'].name}")
+                        with c2:
+                            if st.button("✕", key=f"remove_manual_plan_{i}", help="Remove this plan"):
+                                to_remove = i
+                    if to_remove is not None:
+                        st.session_state.manual_plans_store.pop(to_remove)
+                        st.rerun()
+                    st.divider()
+
+                # Use reset counter in key so widgets clear after Add Plan
+                reset_key = st.session_state._manual_plan_reset
+                man_sel = st.selectbox(
+                    "Select student",
+                    ["(Select a student)"] + sorted(list(name_to_id_map.keys())),
+                    key=f"man_sel_{reset_key}"
+                )
+                man_file = st.file_uploader(
+                    "Upload file",
+                    type=['pdf', 'png', 'jpg'],
+                    key=f"manual_plan_file_{reset_key}"
+                )
+
+                if st.button("Add Plan", key="add_manual_plan_btn", type="primary"):
+                    if man_sel == "(Select a student)":
+                        st.warning("Please select a student first.")
+                    elif man_file is None:
+                        st.warning("Please upload a file first.")
+                    else:
+                        st.session_state.manual_plans_store.append({
+                            'sid': name_to_id_map[man_sel],
+                            'name': man_sel,
+                            'file': man_file
+                        })
+                        st.session_state._manual_plan_reset += 1
+                        st.rerun()
+
+            # ── Step 4: Content options ───────────────────────────────────────────
+            st.markdown('<div class="section-head">Step 4 — Content options</div>', unsafe_allow_html=True)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.markdown('<div class="options-card-title">Header details</div>', unsafe_allow_html=True)
+                opt_year  = st.checkbox("Year level",    value=True)
+                opt_roll  = st.checkbox("Roll group",    value=True)
+                opt_house = st.checkbox("House",         value=True)
+                opt_dob   = st.checkbox("Date of birth", value=True)
+                opt_tutor = st.checkbox("Tutor",         value=True)
+                opt_sid   = st.checkbox("Student ID",    value=True)
+
+                has_swimming     = 'swimming_csv' in st.session_state
+                has_dietary      = 'dietary_csv' in st.session_state
+                has_contact_csv  = 'contact_csv_df' in st.session_state
+                has_photo_perm   = 'photo_perm_csv' in st.session_state
+
+                if has_swimming or has_dietary or has_contact_csv or has_photo_perm:
+                    st.markdown("---")
+                    st.markdown('<div class="options-card-title">Additional data</div>', unsafe_allow_html=True)
+                opt_swimming   = st.checkbox("Swimming ability",      value=True) if has_swimming   else False
+                opt_dietary    = st.checkbox("Dietary requirements",  value=True) if has_dietary    else False
+                opt_sec_home   = st.checkbox("Home contacts",         value=True) if has_contact_csv else False
+                opt_photo_perm = st.checkbox("Photo permissions",     value=True) if has_photo_perm else False
+
+            with col2:
+                st.markdown('<div class="options-card-title">Profile sections</div>', unsafe_allow_html=True)
+                opt_sec_med   = st.checkbox("Medical information",         value=True)
+                opt_sec_emerg = st.checkbox("Emergency contacts",          value=True)
+                opt_sec_docs  = st.checkbox("Medical contacts (doctors)",  value=True)
+                opt_sec_learn = st.checkbox("Learning & support",          value=True)
+
+            # ── Step 5: Sort & output ─────────────────────────────────────────────
+            st.markdown('<div class="section-head">Step 5 — Sort & output</div>', unsafe_allow_html=True)
+
+            col3, col4 = st.columns(2)
+            with col3:
+                sort_by = st.selectbox("Sort students by:", ["Alphabetical (Surname)", "Roll Group", "House", "Year Level"])
+            with col4:
+                if sort_by == "Alphabetical (Surname)":
+                    output_mode = "Single Document"
+                    st.caption("Alphabetical sorting produces a single combined document.")
+                else:
+                    output_mode = st.radio("Output:", ["Single Document", f"Split by {sort_by}"])
+
+            st.markdown("")
+
+            if st.button("Generate Medical Booklet", type="primary"):
+
+                # ── Gather plans ─────────────────────────────────────────────────
+                plan_map = {}
+                detected = st.session_state.get('detected_plans', {})
+                auto_files = st.session_state.get("auto_downloaded_plan_files", {})
+                manual_uploads = st.session_state.get("manual_plan_uploads", {})
+
+                if detected:
+                    for sid, plans in detected.items():
+                        for idx, _ in enumerate(plans):
+                            plan_key = f"{sid}_{idx}"
+                            widget_key = f"plan_upload_{sid}_{idx}"
+
+                            # Priority 1: live widget value (present on same rerun as button click)
+                            live_file = st.session_state.get(widget_key)
+                            if live_file is not None:
+                                try:
+                                    live_file.seek(0)
+                                    raw = live_file.read()
+                                    if raw:
+                                        # Also update the persistent cache while we have it
+                                        manual_uploads[plan_key] = (raw, live_file.name)
+                                        buf = BytesIO(raw)
+                                        buf.name = live_file.name
+                                        if sid not in plan_map: plan_map[sid] = []
+                                        plan_map[sid].append(buf)
+                                        continue
+                                except Exception:
+                                    pass
+
+                            # Priority 2: cached manual upload (raw bytes, survives reruns)
+                            if plan_key in manual_uploads:
+                                raw_bytes, fname = manual_uploads[plan_key]
+                                if raw_bytes:
+                                    buf = BytesIO(raw_bytes)
+                                    buf.name = fname
                                     if sid not in plan_map: plan_map[sid] = []
                                     plan_map[sid].append(buf)
                                     continue
-                            except Exception:
-                                pass
 
-                        # Priority 2: cached manual upload (raw bytes, survives reruns)
-                        if plan_key in manual_uploads:
-                            raw_bytes, fname = manual_uploads[plan_key]
-                            if raw_bytes:
-                                buf = BytesIO(raw_bytes)
-                                buf.name = fname
-                                if sid not in plan_map: plan_map[sid] = []
-                                plan_map[sid].append(buf)
-                                continue
+                            # Priority 3: auto-downloaded file
+                            if plan_key in auto_files:
+                                raw_bytes, fname = auto_files[plan_key]
+                                if raw_bytes:
+                                    buf = BytesIO(raw_bytes)
+                                    buf.name = fname
+                                    if sid not in plan_map: plan_map[sid] = []
+                                    plan_map[sid].append(buf)
 
-                        # Priority 3: auto-downloaded file
-                        if plan_key in auto_files:
-                            raw_bytes, fname = auto_files[plan_key]
-                            if raw_bytes:
-                                buf = BytesIO(raw_bytes)
-                                buf.name = fname
-                                if sid not in plan_map: plan_map[sid] = []
-                                plan_map[sid].append(buf)
+                if "medical_plan_files" in st.session_state:
+                    for sid, fl in st.session_state.medical_plan_files.items():
+                        if sid not in plan_map: plan_map[sid] = []
+                        for f in fl:
+                            plan_map[sid].append(f)
 
-            if "medical_plan_files" in st.session_state:
-                for sid, fl in st.session_state.medical_plan_files.items():
-                    if sid not in plan_map: plan_map[sid] = []
-                    for f in fl:
-                        plan_map[sid].append(f)
+                for entry in st.session_state.get("manual_plans_store", []):
+                    msid = entry['sid']
+                    mf = entry['file']
+                    if mf is not None:
+                        try:
+                            mf.seek(0)
+                            raw = mf.read()
+                            if raw:
+                                buf = BytesIO(raw)
+                                buf.name = getattr(mf, 'name', 'plan.pdf')
+                                if msid not in plan_map: plan_map[msid] = []
+                                plan_map[msid].append(buf)
+                        except Exception:
+                            pass
 
-            for entry in st.session_state.get("manual_plans_store", []):
-                msid = entry['sid']
-                mf = entry['file']
-                if mf is not None:
-                    try:
-                        mf.seek(0)
-                        raw = mf.read()
-                        if raw:
-                            buf = BytesIO(raw)
-                            buf.name = getattr(mf, 'name', 'plan.pdf')
-                            if msid not in plan_map: plan_map[msid] = []
-                            plan_map[msid].append(buf)
-                    except Exception:
-                        pass
+                # ── Prepare data maps (logic unchanged) ──────────────────────────
+                final_photo_map = st.session_state.auto_matches.copy()
+                for p, s in st.session_state.manual_selections.items(): final_photo_map[s] = p
 
-            # ── Prepare data maps (logic unchanged) ──────────────────────────
-            final_photo_map = st.session_state.auto_matches.copy()
-            for p, s in st.session_state.manual_selections.items(): final_photo_map[s] = p
+                final_swimming_map = st.session_state.get('swimming_matched', {}).copy()
+                if st.session_state.get('swimming_manual_selections'):
+                    for swim_idx, student_id in st.session_state.swimming_manual_selections.items():
+                        for item in st.session_state.swimming_unmatched:
+                            if item['index'] == swim_idx:
+                                final_swimming_map[student_id] = item['ability']
+                                break
 
-            final_swimming_map = st.session_state.get('swimming_matched', {}).copy()
-            if st.session_state.get('swimming_manual_selections'):
-                for swim_idx, student_id in st.session_state.swimming_manual_selections.items():
-                    for item in st.session_state.swimming_unmatched:
-                        if item['index'] == swim_idx:
-                            final_swimming_map[student_id] = item['ability']
-                            break
+                final_dietary_map = st.session_state.get('dietary_matched', {}).copy()
+                if st.session_state.get('dietary_manual_selections'):
+                    for dietary_idx, student_id in st.session_state.dietary_manual_selections.items():
+                        for item in st.session_state.dietary_unmatched:
+                            if item['index'] == dietary_idx:
+                                final_dietary_map[student_id] = item['dietary_req']
+                                break
 
-            final_dietary_map = st.session_state.get('dietary_matched', {}).copy()
-            if st.session_state.get('dietary_manual_selections'):
-                for dietary_idx, student_id in st.session_state.dietary_manual_selections.items():
-                    for item in st.session_state.dietary_unmatched:
-                        if item['index'] == dietary_idx:
-                            final_dietary_map[student_id] = item['dietary_req']
-                            break
+                final_photo_perm_map = st.session_state.get('photo_permissions_map', {}).copy()
 
-            final_photo_perm_map = st.session_state.get('photo_permissions_map', {}).copy()
+                print(f"\n{'='*80}")
+                print("SWIMMING ABILITY MAP FOR PDF GENERATION")
+                print(f"{'='*80}")
+                print(f"Total students with swimming data: {len(final_swimming_map)}")
+                if final_swimming_map:
+                    print("\nFirst 10 students with swimming ability:")
+                    for idx, (sid, ability) in enumerate(list(final_swimming_map.items())[:10]):
+                        print(f"  Student {sid}: {ability}")
+                else:
+                    print("⚠️  WARNING: No swimming abilities found!")
+                    print("   Check that swimming CSV was uploaded and analyzed")
+                print(f"{'='*80}\n")
 
-            print(f"\n{'='*80}")
-            print("SWIMMING ABILITY MAP FOR PDF GENERATION")
-            print(f"{'='*80}")
-            print(f"Total students with swimming data: {len(final_swimming_map)}")
-            if final_swimming_map:
-                print("\nFirst 10 students with swimming ability:")
-                for idx, (sid, ability) in enumerate(list(final_swimming_map.items())[:10]):
-                    print(f"  Student {sid}: {ability}")
-            else:
-                print("⚠️  WARNING: No swimming abilities found!")
-                print("   Check that swimming CSV was uploaded and analyzed")
-            print(f"{'='*80}\n")
-
-            # ── Render (logic unchanged) ──────────────────────────────────────
-            status = st.status("Generating booklet…", expanded=True)
-            env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
-            tpl = env.get_template("profiles.html")
-            display_opts = {
-                "year": opt_year, "roll": opt_roll, "house": opt_house,
-                "dob": opt_dob, "tutor": opt_tutor, "sid": opt_sid,
-                "swimming": opt_swimming, "dietary": opt_dietary,
-                "photo_perm": opt_photo_perm
-            }
-
-            all_records = []
-            total = len(df_final)
-            prog = st.progress(0)
-
-            for idx, (_, r) in enumerate(df_final.iterrows()):
-                prog.progress((idx+1)/total)
-                sid = str(r[COLS['student_id']])
-                link_id = re.sub(r'[^a-zA-Z0-9]', '', sid) or f"row{idx}"
-
-                fname, sname = r[COLS['first_name']], r[COLS['surname']]
-                dob = str(r.get('Birth date', r.get('Birth Date', ''))).strip()
-                try: dob = datetime.strptime(dob, '%Y-%m-%d').strftime('%d %b %Y')
-                except: pass
-                house = str(r.get(COLS.get('house', 'House'), '')).strip()
-                tutor = parse_tutor(str(r.get(COLS.get('general_notes', 'General notes'), '')))
-                year_lvl = str(r[COLS['year']])
-                roll = str(r[COLS['rollgroup']])
-
-                raw_med   = str(r.get(COLS['medical_notes'], ""))
-                raw_emerg = str(r.get(COLS['emergency_notes'], ""))
-                parsed_med  = parse_medical_text(raw_med)
-                parsed_con  = parse_emergency_contacts(raw_emerg)
-                parsed_home = parse_home_contacts(r)
-
-                sections = []
-                layout = CONFIG["default_profile_layout"]
-                for sec in layout:
-                    is_med = COLS['medical_notes'] in sec['fields']
-                    is_emg = COLS['emergency_notes'] in sec['fields']
-                    is_lrn = COLS['special_notes'] in sec['fields']
-                    if is_med and opt_sec_med:
-                        sections.append({"title": sec['section'], "type": "medical_cards", "content": parsed_med})
-                    elif is_emg:
-                        if opt_sec_home and (parsed_home['contacts'] or parsed_home['home_address'] or parsed_home['home_phone']):
-                            sections.append({"title": "Home Contacts", "type": "home_contacts", "content": parsed_home})
-                        if opt_sec_emerg:
-                            sections.append({"title": sec['section'], "type": "emergency_grid", "content": parsed_con})
-                        if opt_sec_docs:
-                            d_col = "Doctor notes" if "Doctor notes" in r else COLS.get('doctor_details')
-                            if d_col and d_col in r:
-                                sections.append({"title": "Medical Contacts", "type": "doctor_grid", "content": parse_doctors(str(r.get(d_col, "")))})
-                    elif is_lrn and opt_sec_learn:
-                        sections.append({"title": sec['section'], "type": "learning_support", "content": parse_learning_support(str(r.get(COLS['special_notes'], "")))})
-                    elif not (is_med or is_emg or is_lrn):
-                        vals = [str(r.get(f,"")).strip() for f in sec['fields'] if str(r.get(f,"")).strip()]
-                        if not vals: vals = ["No data supplied."]
-                        sections.append({"title": sec['section'], "type": "text", "content": vals})
-
-                embedded = []
-                if sid in plan_map:
-                    for f in plan_map[sid]:
-                        embedded.extend(convert_file_to_images(f))
-                if sid in st.session_state.attachments:
-                    for f in st.session_state.attachments[sid]: embedded.extend(convert_file_to_images(f))
-
-                med_l = raw_med.lower()
-                c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phone']['display']})" if parsed_con else ""
-
-                swim_ability    = final_swimming_map.get(sid, "Data not recorded")
-                swim_color      = get_swimming_display_color(swim_ability)
-                dietary_req     = final_dietary_map.get(sid, "No data given")
-                photo_perm_val  = final_photo_perm_map.get(sid, None)
-
-                profile_obj = {
-                    "id": sid, "link_id": link_id, "first": fname, "last": sname,
-                    "year": year_lvl, "roll": roll, "house": house, "dob": dob, "tutor": tutor,
-                    "swimming": swim_ability, "swim_color": swim_color,
-                    "dietary": dietary_req,
-                    "photo_perm": photo_perm_val,
-                    "photo": img_to_base64(final_photo_map.get(sid)),
-                    "sections": sections, "attachments": embedded
+                # ── Render (logic unchanged) ──────────────────────────────────────
+                status = st.status("Generating booklet…", expanded=True)
+                env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
+                tpl = env.get_template("profiles.html")
+                display_opts = {
+                    "year": opt_year, "roll": opt_roll, "house": opt_house,
+                    "dob": opt_dob, "tutor": opt_tutor, "sid": opt_sid,
+                    "swimming": opt_swimming, "dietary": opt_dietary,
+                    "photo_perm": opt_photo_perm
                 }
-                matrix_obj = {
-                    "id": sid, "link_id": link_id, "name": f"{sname}, {fname}",
-                    "contact": c_disp, "asthma": "asthma" in med_l,
-                    "allergy": "allergy" in med_l, "anaphylaxis": "anaphylaxis" in med_l,
-                    "swimming": swim_ability, "swim_color": swim_color
-                }
-                medical_obj = None
-                if parsed_med:
-                    medical_obj = {"name": f"{fname} {sname}", "link_id": link_id, "conditions": parsed_med}
 
-                all_records.append({
-                    "profile": profile_obj, "matrix": matrix_obj, "medical": medical_obj,
-                    "sort_keys": {"alpha": sname + fname, "roll": roll, "house": house, "year": year_lvl}
-                })
+                all_records = []
+                total = len(df_final)
+                prog = st.progress(0)
 
-            # ── Sort & group (logic unchanged) ────────────────────────────────
-            status.write("Sorting & grouping…")
+                for idx, (_, r) in enumerate(df_final.iterrows()):
+                    prog.progress((idx+1)/total)
+                    sid = str(r[COLS['student_id']])
+                    link_id = re.sub(r'[^a-zA-Z0-9]', '', sid) or f"row{idx}"
 
-            def render_subset(records, title_suffix=""):
-                s_list   = [r['profile'] for r in records]
-                m_list   = [r['matrix']  for r in records]
-                med_list = [r['medical'] for r in records if r['medical']]
-                m_list.sort(key=lambda x: x['name'])
-                # Build no-permission list for the photo permissions page
-                no_perm_list = [
-                    s for s in s_list
-                    if s.get('photo_perm') in ('No', 'No Response')
-                ] if display_opts.get('photo_perm') else []
-                full_html = tpl.render(
-                    title=f"{st.session_state.project_title} {title_suffix}",
-                    date=datetime.now().strftime("%d %B %Y"),
-                    students=s_list, matrix=m_list, medical_full=med_list,
-                    no_perm_list=no_perm_list,
-                    options=display_opts, mode="full",
-                    student_count=len(s_list)
-                )
-                return HTML(string=full_html).write_pdf()
+                    fname, sname = r[COLS['first_name']], r[COLS['surname']]
+                    dob = str(r.get('Birth date', r.get('Birth Date', ''))).strip()
+                    try: dob = datetime.strptime(dob, '%Y-%m-%d').strftime('%d %b %Y')
+                    except: pass
+                    house = str(r.get(COLS.get('house', 'House'), '')).strip()
+                    tutor = parse_tutor(str(r.get(COLS.get('general_notes', 'General notes'), '')))
+                    year_lvl = str(r[COLS['year']])
+                    roll = str(r[COLS['rollgroup']])
 
-            if sort_by == "Roll Group":
-                all_records.sort(key=lambda x: (str(x['sort_keys']['roll']), x['sort_keys']['alpha']))
-                group_key = 'roll'
-            elif sort_by == "House":
-                all_records.sort(key=lambda x: (str(x['sort_keys']['house']), x['sort_keys']['alpha']))
-                group_key = 'house'
-            elif sort_by == "Year Level":
-                all_records.sort(key=lambda x: (str(x['sort_keys']['year']), x['sort_keys']['alpha']))
-                group_key = 'year'
-            else:
-                all_records.sort(key=lambda x: x['sort_keys']['alpha'])
-                group_key = 'alpha'
+                    raw_med   = str(r.get(COLS['medical_notes'], ""))
+                    raw_emerg = str(r.get(COLS['emergency_notes'], ""))
+                    parsed_med  = parse_medical_text(raw_med)
+                    parsed_con  = parse_emergency_contacts(raw_emerg)
+                    parsed_home = parse_home_contacts(r)
 
-            if "Split" in output_mode:
-                status.write("Generating split PDFs…")
-                zip_buffer = BytesIO()
-                groups = {}
-                for r in all_records:
-                    k = r['sort_keys'][group_key]
-                    if not k: k = "Unknown"
-                    if k not in groups: groups[k] = []
-                    groups[k].append(r)
-                with zipfile.ZipFile(zip_buffer, "w") as zf:
-                    for g_name, g_records in groups.items():
-                        safe_name = re.sub(r'[^a-zA-Z0-9]', '_', str(g_name))
-                        pdf_data = render_subset(g_records, title_suffix=f"— {g_name}")
-                        zf.writestr(f"Medical_Booklet_{safe_name}.pdf", pdf_data)
-                status.update(label="✅ All files generated", state="complete", expanded=False)
-                st.download_button("⬇ Download ZIP", data=zip_buffer.getvalue(),
-                                   file_name="Medical_Booklets.zip", mime="application/zip")
-            else:
-                status.write("Generating PDF…")
-                pdf_data = render_subset(all_records)
-                status.update(label="✅ Booklet ready", state="complete", expanded=False)
-                st.download_button("⬇ Download Medical Booklet", data=pdf_data,
-                                   file_name="Medical_Booklet.pdf", mime="application/pdf")
+                    sections = []
+                    layout = CONFIG["default_profile_layout"]
+                    for sec in layout:
+                        is_med = COLS['medical_notes'] in sec['fields']
+                        is_emg = COLS['emergency_notes'] in sec['fields']
+                        is_lrn = COLS['special_notes'] in sec['fields']
+                        if is_med and opt_sec_med:
+                            sections.append({"title": sec['section'], "type": "medical_cards", "content": parsed_med})
+                        elif is_emg:
+                            if opt_sec_home and (parsed_home['contacts'] or parsed_home['home_address'] or parsed_home['home_phone']):
+                                sections.append({"title": "Home Contacts", "type": "home_contacts", "content": parsed_home})
+                            if opt_sec_emerg:
+                                sections.append({"title": sec['section'], "type": "emergency_grid", "content": parsed_con})
+                            if opt_sec_docs:
+                                d_col = "Doctor notes" if "Doctor notes" in r else COLS.get('doctor_details')
+                                if d_col and d_col in r:
+                                    sections.append({"title": "Medical Contacts", "type": "doctor_grid", "content": parse_doctors(str(r.get(d_col, "")))})
+                        elif is_lrn and opt_sec_learn:
+                            sections.append({"title": sec['section'], "type": "learning_support", "content": parse_learning_support(str(r.get(COLS['special_notes'], "")))})
+                        elif not (is_med or is_emg or is_lrn):
+                            vals = [str(r.get(f,"")).strip() for f in sec['fields'] if str(r.get(f,"")).strip()]
+                            if not vals: vals = ["No data supplied."]
+                            sections.append({"title": sec['section'], "type": "text", "content": vals})
+
+                    embedded = []
+                    if sid in plan_map:
+                        for f in plan_map[sid]:
+                            embedded.extend(convert_file_to_images(f))
+                    if sid in st.session_state.attachments:
+                        for f in st.session_state.attachments[sid]: embedded.extend(convert_file_to_images(f))
+
+                    med_l = raw_med.lower()
+                    c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phone']['display']})" if parsed_con else ""
+
+                    swim_ability    = final_swimming_map.get(sid, "Data not recorded")
+                    swim_color      = get_swimming_display_color(swim_ability)
+                    dietary_req     = final_dietary_map.get(sid, "No data given")
+                    photo_perm_val  = final_photo_perm_map.get(sid, None)
+
+                    profile_obj = {
+                        "id": sid, "link_id": link_id, "first": fname, "last": sname,
+                        "year": year_lvl, "roll": roll, "house": house, "dob": dob, "tutor": tutor,
+                        "swimming": swim_ability, "swim_color": swim_color,
+                        "dietary": dietary_req,
+                        "photo_perm": photo_perm_val,
+                        "photo": img_to_base64(final_photo_map.get(sid)),
+                        "sections": sections, "attachments": embedded
+                    }
+                    matrix_obj = {
+                        "id": sid, "link_id": link_id, "name": f"{sname}, {fname}",
+                        "contact": c_disp, "asthma": "asthma" in med_l,
+                        "allergy": "allergy" in med_l, "anaphylaxis": "anaphylaxis" in med_l,
+                        "swimming": swim_ability, "swim_color": swim_color
+                    }
+                    medical_obj = None
+                    if parsed_med:
+                        medical_obj = {"name": f"{fname} {sname}", "link_id": link_id, "conditions": parsed_med}
+
+                    all_records.append({
+                        "profile": profile_obj, "matrix": matrix_obj, "medical": medical_obj,
+                        "sort_keys": {"alpha": sname + fname, "roll": roll, "house": house, "year": year_lvl}
+                    })
+
+                # ── Sort & group (logic unchanged) ────────────────────────────────
+                status.write("Sorting & grouping…")
+
+                def render_subset(records, title_suffix=""):
+                    s_list   = [r['profile'] for r in records]
+                    m_list   = [r['matrix']  for r in records]
+                    med_list = [r['medical'] for r in records if r['medical']]
+                    m_list.sort(key=lambda x: x['name'])
+                    # Build no-permission list for the photo permissions page
+                    no_perm_list = [
+                        s for s in s_list
+                        if s.get('photo_perm') in ('No', 'No Response')
+                    ] if display_opts.get('photo_perm') else []
+                    full_html = tpl.render(
+                        title=f"{st.session_state.project_title} {title_suffix}",
+                        date=datetime.now().strftime("%d %B %Y"),
+                        students=s_list, matrix=m_list, medical_full=med_list,
+                        no_perm_list=no_perm_list,
+                        options=display_opts, mode="full",
+                        student_count=len(s_list)
+                    )
+                    return HTML(string=full_html).write_pdf()
+
+                if sort_by == "Roll Group":
+                    all_records.sort(key=lambda x: (str(x['sort_keys']['roll']), x['sort_keys']['alpha']))
+                    group_key = 'roll'
+                elif sort_by == "House":
+                    all_records.sort(key=lambda x: (str(x['sort_keys']['house']), x['sort_keys']['alpha']))
+                    group_key = 'house'
+                elif sort_by == "Year Level":
+                    all_records.sort(key=lambda x: (str(x['sort_keys']['year']), x['sort_keys']['alpha']))
+                    group_key = 'year'
+                else:
+                    all_records.sort(key=lambda x: x['sort_keys']['alpha'])
+                    group_key = 'alpha'
+
+                if "Split" in output_mode:
+                    status.write("Generating split PDFs…")
+                    zip_buffer = BytesIO()
+                    groups = {}
+                    for r in all_records:
+                        k = r['sort_keys'][group_key]
+                        if not k: k = "Unknown"
+                        if k not in groups: groups[k] = []
+                        groups[k].append(r)
+                    with zipfile.ZipFile(zip_buffer, "w") as zf:
+                        for g_name, g_records in groups.items():
+                            safe_name = re.sub(r'[^a-zA-Z0-9]', '_', str(g_name))
+                            pdf_data = render_subset(g_records, title_suffix=f"— {g_name}")
+                            zf.writestr(f"Medical_Booklet_{safe_name}.pdf", pdf_data)
+                    status.update(label="✅ All files generated", state="complete", expanded=False)
+                    st.download_button("⬇ Download ZIP", data=zip_buffer.getvalue(),
+                                       file_name="Medical_Booklets.zip", mime="application/zip")
+                else:
+                    status.write("Generating PDF…")
+                    pdf_data = render_subset(all_records)
+                    status.update(label="✅ Booklet ready", state="complete", expanded=False)
+                    st.download_button("⬇ Download Medical Booklet", data=pdf_data,
+                                       file_name="Medical_Booklet.pdf", mime="application/pdf")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — SEQTA GROUP CREATOR
