@@ -49,8 +49,6 @@ if 'dietary_manual_selections' not in st.session_state:
     st.session_state.dietary_manual_selections = {} # Stores { 'dietary_idx': 'student_id' }
 if 'photo_permissions_map' not in st.session_state:
     st.session_state.photo_permissions_map = {} # Stores { 'student_id': 'Yes'|'No'|'No Response' }
-if 'excursion_contact_map' not in st.session_state:
-    st.session_state.excursion_contact_map = {} # Stores { 'student_id': parsed home contact dict }
 import pandas as pd
 import zipfile
 import yaml
@@ -529,264 +527,6 @@ def parse_home_contacts(row):
         print(f"Error parsing home contacts: {e}")
         return {"contacts": [], "home_address": "", "home_phone": ""}
 
-def parse_excursion_pdf(pdf_file, df_main):
-    """
-    Parses the school 'Excursion contact & medical info' PDF.
-
-    The PDF has a multi-column table layout:
-      Col 1: Student name (Surname, First (Preferred)) + year/roll below
-      Col 2: DOB
-      Col 3: Contacts block — address, Home/Mobile header, parent lines
-      Col 4: Medical info (ignored — already in student CSV)
-
-    Uses pdfplumber word extraction with x-position filtering so that
-    columns are not mixed together.
-
-    Returns: { student_id: {
-        "home_address": str,
-        "home_phone":   str,
-        "contacts": [ {"name": str, "relation": str, "phone": {...}} ]
-    } }
-    """
-    if pdf_file is None:
-        return {}
-
-    # ── Build student surname lookup ──────────────────────────────────────────
-    surname_lookup = {}
-    for _, row in df_main.iterrows():
-        sid   = str(row[COLS['student_id']])
-        last  = str(row[COLS['surname']]).strip()
-        first = str(row[COLS['first_name']]).strip()
-        pref  = str(row.get('Preferred name', '')).strip()
-        key   = re.sub(r'[\s\-\']', '', last).lower()
-        surname_lookup.setdefault(key, []).append({
-            'sid': sid, 'last': last.lower(),
-            'first': first.lower(), 'pref': pref.lower()
-        })
-
-    RELATIONSHIP_WORDS = {
-        'mother', 'father', 'mum', 'dad', 'parent', 'guardian',
-        'aunt', 'uncle', 'grandparent', 'grandmother', 'grandfather',
-        'nana', 'pop', 'carer', 'stepmother', 'stepfather',
-        'stepmum', 'stepdad', 'sibling', 'sister', 'brother',
-    }
-
-    def _match_student(name_line):
-        """Match 'Surname, First (Pref)' to a student_id. Returns None if no match."""
-        parts = name_line.split(',', 1)
-        if len(parts) < 2:
-            return None
-        raw_last = parts[0].strip()
-        rest     = parts[1].strip()
-        pref_m   = re.search(r'\(([^)]+)\)', rest)
-        pref_g   = pref_m.group(1).strip().lower() if pref_m else ''
-        given    = re.sub(r'\([^)]*\)', '', rest).strip().lower()
-        key      = re.sub(r'[\s\-\']', '', raw_last).lower()
-        cands    = surname_lookup.get(key, [])
-        if not cands:
-            return None
-        if len(cands) == 1:
-            return cands[0]['sid']
-        for c in cands:
-            if c['first'] == given or (pref_g and c['pref'] == pref_g):
-                return c['sid']
-        for c in cands:
-            if given and (given in c['first'] or c['first'] in given):
-                return c['sid']
-        return cands[0]['sid']
-
-    def _extract_phone(text):
-        m = re.search(r'(\(?\d[\d\s\-\(\)]{6,}\d)', text)
-        if m:
-            d = m.group(1).strip()
-            return d, f"tel:{re.sub(r'[^0-9+]', '', d)}"
-        return None, None
-
-    def _words_to_lines(words):
-        """Group pdfplumber word dicts into logical lines by vertical proximity."""
-        if not words:
-            return []
-        words = sorted(words, key=lambda w: (round(w['top'] / 4) * 4, w['x0']))
-        lines = []
-        cur_top = None
-        cur_parts = []
-        for w in words:
-            t = w['top']
-            if cur_top is None or abs(t - cur_top) > 6:
-                if cur_parts:
-                    lines.append(' '.join(cur_parts))
-                cur_parts = [w['text']]
-                cur_top = t
-            else:
-                cur_parts.append(w['text'])
-        if cur_parts:
-            lines.append(' '.join(cur_parts))
-        return lines
-
-    def _parse_contact_lines(lines):
-        """Parse contact-column text lines into structured home contact data."""
-        contacts     = []
-        home_address = ""
-        home_phone   = ""
-        i = 0
-        while i < len(lines):
-            line = lines[i].strip()
-            if not line:
-                i += 1; continue
-            if re.match(r'(?i)^(medical|last changed|emergency contact\b)', line):
-                break
-
-            # "Home: ... Mobile: ..." header line
-            if re.match(r'(?i)^home\s*:', line):
-                home_m = re.search(r'(?i)home\s*:\s*([\d\s\-\(\)]+?)(?:\s+mobile\s*:|$)', line)
-                if home_m:
-                    ph, _ = _extract_phone(home_m.group(1))
-                    if ph and not home_phone:
-                        home_phone = ph
-                i += 1; continue
-
-            # Relationship + contact name line
-            first_tok = line.split()[0].lower().rstrip('.,') if line.split() else ''
-            if first_tok in RELATIONSHIP_WORDS:
-                relation  = line.split()[0]
-                remainder = line[len(relation):].strip()
-
-                mob_match   = re.search(r'(?i)mobile\s*:\s*([\d\s\-\(\)]+)', remainder)
-                mob_d, mob_l = (None, None)
-                if mob_match:
-                    mob_d, mob_l = _extract_phone(mob_match.group(1))
-                    name_part = remainder[:mob_match.start()].strip()
-                else:
-                    name_part = remainder.strip()
-
-                home2_ph = work_ph = None
-                if i + 1 < len(lines):
-                    nxt = lines[i + 1].strip()
-                    if re.match(r'(?i)^home\s*:', nxt):
-                        h2m = re.search(r'(?i)home\s*:\s*([\d\s\-\(\)]+?)(?:\s+work\s*:|$)', nxt)
-                        if h2m: home2_ph, _ = _extract_phone(h2m.group(1))
-                        wm  = re.search(r'(?i)work\s*:\s*([\d\s\-\(\)]+)', nxt)
-                        if wm:  work_ph,  _ = _extract_phone(wm.group(1))
-                        i += 1
-
-                phone_obj = None
-                if mob_d:
-                    phone_obj = {"display": mob_d, "link": mob_l}
-                elif home2_ph:
-                    clean = re.sub(r'[^\d+]', '', home2_ph)
-                    phone_obj = {"display": home2_ph, "link": f"tel:{clean}"}
-                elif work_ph:
-                    clean = re.sub(r'[^\d+]', '', work_ph)
-                    phone_obj = {"display": work_ph, "link": f"tel:{clean}"}
-
-                if name_part:
-                    contacts.append({"name": name_part, "relation": relation, "phone": phone_obj})
-                i += 1; continue
-
-            # Address line (has digits, not a phone-only line)
-            if re.search(r'\d', line) and len(line) > 8 and not re.match(r'(?i)^(mobile\s*:|work\s*:|\d{2}/\d{2})', line):
-                if not home_address:
-                    home_address = line
-                i += 1; continue
-
-            i += 1
-
-        return {"home_address": home_address, "home_phone": home_phone, "contacts": contacts}
-
-    results = {}
-
-    try:
-        if hasattr(pdf_file, 'seek'):
-            pdf_file.seek(0)
-
-        with pdfplumber.open(pdf_file) as pdf:
-            for page_num, page in enumerate(pdf.pages):
-                page_width  = page.width
-                page_height = page.height
-
-                all_words = page.extract_words(x_tolerance=4, y_tolerance=4)
-                if not all_words:
-                    continue
-
-                # Detect column boundaries from header words
-                contacts_header_x = None
-                medical_header_x  = None
-                for w in all_words:
-                    if w['text'].lower() in ('contacts', 'contact'):
-                        contacts_header_x = w['x0']
-                    if w['text'].lower() in ('medical', 'info') and w['x0'] > page_width * 0.5:
-                        medical_header_x = w['x0']
-
-                if contacts_header_x is None:
-                    contacts_header_x = page_width * 0.27
-                if medical_header_x is None:
-                    medical_header_x = page_width * 0.60
-
-                name_col_x1    = contacts_header_x - 5
-                contact_col_x0 = contacts_header_x - 5
-                contact_col_x1 = medical_header_x  - 5
-
-                print(f"[ExcPDF p{page_num+1}] page_w={page_width:.0f}  "
-                      f"name_col x<{name_col_x1:.0f}  "
-                      f"contact_col {contact_col_x0:.0f}–{contact_col_x1:.0f}")
-
-                name_words    = [w for w in all_words if w['x1'] <= name_col_x1]
-                contact_words = [w for w in all_words
-                                 if w['x0'] >= contact_col_x0 and w['x1'] <= contact_col_x1 + 20]
-
-                # Find student name anchors (y-position + student_id)
-                student_anchors = []
-                seen_sids = set()
-                for w in sorted(name_words, key=lambda x: x['top']):
-                    line_text_raw = ' '.join(
-                        ww['text'] for ww in name_words
-                        if abs(ww['top'] - w['top']) < 6
-                    )
-                    if ',' not in line_text_raw:
-                        continue
-                    if re.match(r'(?i)^(student|un\s+\d|ma\s+\d|ra\s+\d)', line_text_raw.strip()):
-                        continue
-                    sid = _match_student(line_text_raw.strip())
-                    if sid and sid not in seen_sids:
-                        student_anchors.append((w['top'], sid))
-                        seen_sids.add(sid)
-                        print(f"[ExcPDF p{page_num+1}] Anchor: y={w['top']:.0f} sid={sid} '{line_text_raw.strip()[:40]}'")
-
-                if not student_anchors:
-                    print(f"[ExcPDF p{page_num+1}] No student anchors found — skipping page")
-                    continue
-
-                student_anchors.sort(key=lambda x: x[0])
-
-                for idx, (top_y, sid) in enumerate(student_anchors):
-                    bot_y = student_anchors[idx + 1][0] - 2 if idx + 1 < len(student_anchors) else page_height
-
-                    band_words = [w for w in contact_words
-                                  if w['top'] >= top_y - 6 and w['bottom'] <= bot_y + 6]
-
-                    contact_lines = _words_to_lines(band_words)
-                    print(f"[ExcPDF p{page_num+1}] sid={sid} lines={contact_lines[:5]}")
-
-                    parsed = _parse_contact_lines(contact_lines)
-                    if parsed['contacts'] or parsed['home_address']:
-                        if sid in results:
-                            ex = results[sid]
-                            if not ex['home_address'] and parsed['home_address']:
-                                ex['home_address'] = parsed['home_address']
-                            if not ex['home_phone'] and parsed['home_phone']:
-                                ex['home_phone'] = parsed['home_phone']
-                            ex['contacts'].extend(parsed['contacts'])
-                        else:
-                            results[sid] = parsed
-
-    except Exception as e:
-        import traceback
-        print(f"[parse_excursion_pdf] Error: {e}\n{traceback.format_exc()}")
-
-    print(f"[parse_excursion_pdf] Done — contact data for {len(results)} students.")
-    return results
-
-
 def parse_emergency_contact_names(emergency_text):
     """
     Extracts names from emergency contact text in Student List CSV.
@@ -1219,15 +959,8 @@ def match_photo_permissions(df_main, photo_perm_csv):
         contact_df    = st.session_state.get('contact_csv_df', None)
         parent_lookup = _build_parent_surname_lookup(contact_df)   # surname -> {sid,...}
         using_contact = bool(parent_lookup)
-
-        # ── Tier 3 prep: excursion PDF contacts ───────────────────────────────
-        # { sid: { contacts: [ {name: "Jane Smith", relation: "Mother"} ] } }
-        excursion_map   = st.session_state.get('excursion_contact_map', {})
-        using_excursion = bool(excursion_map)
-
         print(f"Emergency contacts: always active (first + last name required)")
         print(f"Contact CSV (SC1/SC2): {using_contact} ({len(parent_lookup)} surnames indexed)")
-        print(f"Excursion PDF contacts: {using_excursion} ({len(excursion_map)} students indexed)")
 
         # ── Tier 3 prep: student own-surname lookup ───────────────────────────
         student_surname_lookup = {}
@@ -1307,21 +1040,6 @@ def match_photo_permissions(df_main, photo_perm_csv):
                             tier_desc = f"contact CSV '{perm['first']} {perm['surname']}'"
                             confirmed_matches.append((perm['result'], tier_desc))
                             break
-
-            # ── Tier 3: Excursion PDF contacts — directly linked to this student
-            #            Match perm first+last against each contact's name for this sid
-            if not confirmed_matches and using_excursion and sid in excursion_map:
-                exc_contacts = excursion_map[sid].get('contacts', [])
-                for exc_contact in exc_contacts:
-                    exc_name = exc_contact.get('name', '').strip().lower()
-                    if not exc_name:
-                        continue
-                    for perm in perm_records:
-                        if _name_matches_perm(exc_name, perm):
-                            tier_desc = (f"excursion PDF contact '{exc_name}' "
-                                         f"matched '{perm['first']} {perm['surname']}'")
-                            confirmed_matches.append((perm['result'], tier_desc))
-                            print(f"  [Tier 3] {tier_desc}")
 
             # ── Resolve: among confirmed matches, No wins only over Yes.
             # An unrelated person sharing a surname is never in confirmed_matches
@@ -2172,15 +1890,6 @@ with t1:
         """, unsafe_allow_html=True)
         photo_perm_csv = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed")
 
-    with col_f2:
-        st.markdown("""
-        <div class="upload-card optional">
-          <div class="upload-card-label">Excursion Info PDF</div>
-          <div class="upload-card-desc">Adds home address and parent/guardian contacts from the school excursion student information PDF. Also used to match photo permissions.</div>
-        </div>
-        """, unsafe_allow_html=True)
-        excursion_pdf = st.file_uploader("Excursion Info PDF", type="pdf", label_visibility="collapsed")
-
     # ── File processing (logic unchanged) ─────────────────────────────────────
     if csv:
         df_temp = pd.read_csv(csv).fillna("")
@@ -2228,19 +1937,6 @@ with t1:
     if photo_perm_csv:
         st.session_state.photo_perm_csv = photo_perm_csv
         st.success("✅ Photo permissions CSV loaded")
-
-    if excursion_pdf:
-        if "df" in st.session_state:
-            with st.spinner("Parsing excursion PDF for home contact details…"):
-                excursion_map = parse_excursion_pdf(excursion_pdf, st.session_state.df)
-                st.session_state.excursion_contact_map = excursion_map
-            n_found = len(excursion_map)
-            if n_found > 0:
-                st.success(f"✅ Excursion PDF parsed — home contacts found for {n_found} students")
-            else:
-                st.warning("⚠️  Excursion PDF uploaded but no student contacts could be parsed. Check the PDF format matches the expected layout.")
-        else:
-            st.warning("⚠️  Please upload the Student List CSV first, then re-upload the Excursion PDF so names can be matched.")
 
     if photos:
         path = os.path.join(TEMP_DIR, "photos.pdf")
@@ -2624,17 +2320,15 @@ with t2:
             has_swimming     = 'swimming_csv' in st.session_state
             has_dietary      = 'dietary_csv' in st.session_state
             has_contact_csv  = 'contact_csv_df' in st.session_state
-            has_excursion_contacts = bool(st.session_state.get('excursion_contact_map'))
-            has_home_contacts = has_contact_csv or has_excursion_contacts
             has_photo_perm   = 'photo_perm_csv' in st.session_state
 
-            if has_swimming or has_dietary or has_home_contacts or has_photo_perm:
+            if has_swimming or has_dietary or has_contact_csv or has_photo_perm:
                 st.markdown("---")
                 st.markdown('<div class="options-card-title">Additional data</div>', unsafe_allow_html=True)
-            opt_swimming   = st.checkbox("Swimming ability",      value=True) if has_swimming      else False
-            opt_dietary    = st.checkbox("Dietary requirements",  value=True) if has_dietary       else False
-            opt_sec_home   = st.checkbox("Home contacts",         value=True) if has_home_contacts else False
-            opt_photo_perm = st.checkbox("Photo permissions",     value=True) if has_photo_perm    else False
+            opt_swimming   = st.checkbox("Swimming ability",      value=True) if has_swimming   else False
+            opt_dietary    = st.checkbox("Dietary requirements",  value=True) if has_dietary    else False
+            opt_sec_home   = st.checkbox("Home contacts",         value=True) if has_contact_csv else False
+            opt_photo_perm = st.checkbox("Photo permissions",     value=True) if has_photo_perm else False
 
         with col2:
             st.markdown('<div class="options-card-title">Profile sections</div>', unsafe_allow_html=True)
@@ -2797,13 +2491,7 @@ with t2:
                 raw_emerg = str(r.get(COLS['emergency_notes'], ""))
                 parsed_med  = parse_medical_text(raw_med)
                 parsed_con  = parse_emergency_contacts(raw_emerg)
-
-                # Prefer excursion PDF home contacts over CSV contacts when available
-                excursion_map = st.session_state.get('excursion_contact_map', {})
-                if sid in excursion_map:
-                    parsed_home = excursion_map[sid]
-                else:
-                    parsed_home = parse_home_contacts(r)
+                parsed_home = parse_home_contacts(r)
 
                 sections = []
                 layout = CONFIG["default_profile_layout"]
