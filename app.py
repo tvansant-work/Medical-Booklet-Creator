@@ -359,6 +359,13 @@ def detect_medical_plans(df):
 def parse_medical_text(text):
     if not isinstance(text, str) or not text.strip(): return []
     text = text.replace('\r\n', '\n')
+
+    # Extract "Last changed" date from the preamble (before first ---)
+    last_changed = None
+    lc_match = re.search(r'Last changed:\s*(\S.*)', text)
+    if lc_match:
+        last_changed = lc_match.group(1).strip()
+
     blocks = re.split(r'-{3,}', text)
     parsed_conditions = []
 
@@ -385,12 +392,14 @@ def parse_medical_text(text):
                     css_class = "moderate"
 
                 parsed_conditions.append({
-                    "name": cond_name, "severity": severity, "description": description, "css_class": css_class
+                    "name": cond_name, "severity": severity, "description": description,
+                    "css_class": css_class, "last_changed": last_changed
                 })
     
     if not parsed_conditions and len(text) > 10 and "No data" not in text:
         parsed_conditions.append({
-            "name": "General Medical Note", "severity": "Info", "description": text, "css_class": "mild"
+            "name": "General Medical Note", "severity": "Info", "description": text,
+            "css_class": "mild", "last_changed": last_changed
         })
     return parsed_conditions
 
@@ -2634,11 +2643,25 @@ if t2 is not None:
                     dob = str(r.get('Birth date', r.get('Birth Date', ''))).strip()
                     try: dob = datetime.strptime(dob, '%Y-%m-%d').strftime('%d %b %Y')
                     except: pass
-                    gender_raw = str(r.get('Gender', r.get('gender', ''))).strip().lower()
-                    if gender_raw == 'm': gender = 'Male'
-                    elif gender_raw == 'f': gender = 'Female'
-                    elif gender_raw and gender_raw not in ('nan', ''): gender = 'Other'
-                    else: gender = ''
+                    gender_raw = str(r.get('Gender', r.get('gender', ''))).strip()
+                    gender_lower = gender_raw.lower()
+                    if gender_lower == 'm': gender = 'Male'
+                    elif gender_lower == 'f': gender = 'Female'
+                    else:
+                        # For anything other than m/f, check General notes for a "Gender:" entry
+                        general_notes_text = str(r.get(COLS.get('general_notes', 'General notes'), ''))
+                        gn_match = re.search(r'Gender:\s*\n?(.*?)(?:\n|$)', general_notes_text, re.IGNORECASE)
+                        gn_value = gn_match.group(1).strip() if gn_match else ''
+                        # The value might be blank on the same line and on the next line instead
+                        if not gn_value:
+                            gn_match2 = re.search(r'Gender:\s*\n([^\n]+)', general_notes_text, re.IGNORECASE)
+                            gn_value = gn_match2.group(1).strip() if gn_match2 else ''
+                        if gn_value and gn_value.lower() not in ('nan', ''):
+                            gender = gn_value
+                        elif gender_raw and gender_lower not in ('nan', ''):
+                            gender = 'Other'
+                        else:
+                            gender = ''
                     house = str(r.get(COLS.get('house', 'House'), '')).strip()
                     tutor = parse_tutor(str(r.get(COLS.get('general_notes', 'General notes'), '')))
                     year_lvl = str(r[COLS['year']])

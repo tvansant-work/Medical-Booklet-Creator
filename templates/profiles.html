@@ -398,6 +398,9 @@
             {% if sec.content|length == 0 %}
                 <p style="color:#777; font-style:italic;">No medical conditions listed.</p>
             {% else %}
+                {% if sec.content[0].last_changed %}
+                <p style="font-size:8.5pt; color:#999; margin: -4px 0 10px 0; font-style:italic;">Last updated: {{ sec.content[0].last_changed }}</p>
+                {% endif %}
                 {% for cond in sec.content %}
                 <div class="med-card {{ cond.css_class }}">
                     <div class="med-header">
@@ -455,7 +458,7 @@
                 <div class="contact-card">
                     <div class="c-name">{{ c.name }}</div>
                     <div class="c-rel">{{ c.relation }}</div>
-                    {% if c.phone %}
+                    {% if c.phone and c.phone.link %}
                     <div class="c-phone"><a href="{{ c.phone.link }}">📞 {{ c.phone.display }}</a></div>
                     {% endif %}
                 </div>
