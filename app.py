@@ -455,14 +455,15 @@ def parse_emergency_contacts(text):
         lines = block.split('\n')
         name = lines[0].strip()
         relation = "Unknown"
-        phone = ""
+        phones = []
         for line in lines:
             if "Relationship:" in line: relation = line.split("Relationship:")[-1].strip()
             if "Telephone:" in line:
                 phone_raw = line.split("Telephone:")[-1].strip()
-                phone_clean = re.sub(r'[^\d+]', '', phone_raw) 
-                phone = {"display": phone_raw, "link": f"tel:{phone_clean}"}
-        if phone: contacts.append({"name": name, "relation": relation, "phone": phone})
+                if phone_raw:
+                    phone_clean = re.sub(r'[^\d+]', '', phone_raw)
+                    phones.append({"display": phone_raw, "link": f"tel:{phone_clean}"})
+        if phones: contacts.append({"name": name, "relation": relation, "phones": phones})
     return contacts
 
 def parse_home_contacts(row):
@@ -2633,6 +2634,11 @@ if t2 is not None:
                     dob = str(r.get('Birth date', r.get('Birth Date', ''))).strip()
                     try: dob = datetime.strptime(dob, '%Y-%m-%d').strftime('%d %b %Y')
                     except: pass
+                    gender_raw = str(r.get('Gender', r.get('gender', ''))).strip().lower()
+                    if gender_raw == 'm': gender = 'Male'
+                    elif gender_raw == 'f': gender = 'Female'
+                    elif gender_raw and gender_raw not in ('nan', ''): gender = 'Other'
+                    else: gender = ''
                     house = str(r.get(COLS.get('house', 'House'), '')).strip()
                     tutor = parse_tutor(str(r.get(COLS.get('general_notes', 'General notes'), '')))
                     year_lvl = str(r[COLS['year']])
@@ -2676,7 +2682,7 @@ if t2 is not None:
                         for f in st.session_state.attachments[sid]: embedded.extend(convert_file_to_images(f))
 
                     med_l = raw_med.lower()
-                    c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phone']['display']})" if parsed_con else ""
+                    c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phones'][0]['display']})" if parsed_con else ""
 
                     swim_ability    = final_swimming_map.get(sid, "Data not recorded")
                     swim_color      = get_swimming_display_color(swim_ability)
@@ -2685,7 +2691,7 @@ if t2 is not None:
 
                     profile_obj = {
                         "id": sid, "link_id": link_id, "first": fname, "last": sname,
-                        "year": year_lvl, "roll": roll, "house": house, "dob": dob, "tutor": tutor,
+                        "year": year_lvl, "roll": roll, "house": house, "dob": dob, "gender": gender, "tutor": tutor,
                         "swimming": swim_ability, "swim_color": swim_color,
                         "dietary": dietary_req,
                         "photo_perm": photo_perm_val,

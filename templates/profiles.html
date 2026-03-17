@@ -374,6 +374,7 @@
                             <span><label>Swimming:</label><span class="{{ s.swim_color }}">{{ s.swimming }}</span></span>
                         </div>
                         {% if options.dob and s.dob %}<div class="meta-row"><span><label>DOB:</label>{{ s.dob }}</span></div>{% endif %}
+                        {% if s.gender %}<div class="meta-row"><span><label>Gender:</label>{{ s.gender }}</span></div>{% endif %}
                         {% if options.tutor and s.tutor %}<div class="meta-row"><span><label>Tutor:</label>{{ s.tutor }}</span></div>{% endif %}
                         {% if options.photo_perm and s.photo_perm %}
                         <div class="meta-row"><span><label>Photo Permissions:</label>
@@ -439,7 +440,9 @@
                     <div class="contact-card">
                         <div class="c-name">{{ c.name }}</div>
                         <div class="c-rel">{{ c.relation }}</div>
-                        <div class="c-phone"><a href="{{ c.phone.link }}">📞 {{ c.phone.display }}</a></div>
+                        {% for ph in c.phones %}
+                        <div class="c-phone"><a href="{{ ph.link }}">📞 {{ ph.display }}</a></div>
+                        {% endfor %}
                     </div>
                     {% endfor %}
                 {% endif %}
