@@ -2723,6 +2723,7 @@ if t2 is not None:
                     }
                     matrix_obj = {
                         "id": sid, "link_id": link_id, "name": f"{sname}, {fname}",
+                        "gender": gender,
                         "contact": c_disp, "asthma": "asthma" in med_l,
                         "allergy": "allergy" in med_l, "anaphylaxis": "anaphylaxis" in med_l,
                         "swimming": swim_ability, "swim_color": swim_color

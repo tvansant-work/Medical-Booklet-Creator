@@ -293,23 +293,25 @@
     <table class="matrix-table">
         <thead>
             <tr>
-                <th width="20%">Student</th>
-                <th width="30%">Primary Emergency Contact</th>
+                <th width="18%">Student</th>
+                <th width="8%">Gender</th>
+                <th width="26%">Emergency Contact<br><span style="font-style:italic; font-size:0.82em; font-weight:normal;">(option 1)</span></th>
                 <th width="8%">Asthma</th>
                 <th width="8%">Allergy</th>
                 <th width="8%">Anaphylaxis</th>
-                <th width="18%">Swimming Ability</th>
+                {% if options.swimming %}<th width="16%">Swimming Ability</th>{% endif %}
             </tr>
         </thead>
         <tbody>
             {% for row in matrix %}
             <tr>
                 <td><a href="#student-{{row.link_id}}" style="font-weight:bold;">{{ row.name }}</a></td>
+                <td class="center">{{ row.gender }}</td>
                 <td>{{ row.contact }}</td>
                 <td class="center">{% if row.asthma %}<span class="check-mark">X</span>{% endif %}</td>
                 <td class="center">{% if row.allergy %}<span class="check-mark">X</span>{% endif %}</td>
                 <td class="center">{% if row.anaphylaxis %}<span class="red-cross">X</span>{% endif %}</td>
-                <td class="center"><span class="{{ row.swim_color }}">{{ row.swimming }}</span></td>
+                {% if options.swimming %}<td class="center"><span class="{{ row.swim_color }}">{{ row.swimming }}</span></td>{% endif %}
             </tr>
             {% endfor %}
         </tbody>
