@@ -1449,9 +1449,9 @@ def extract_photos_geometric(photo_pdf_path, df):
         s_roll  = str(row[COLS['rollgroup']]).strip().lower()
 
         # Clean the key the same way we'll clean PDF text:
-        clean_key = clean_ligatures(
-            s_last.replace(" ", "").replace("-", "").replace("'", "")
-        )
+        _s_last_stripped = s_last.replace(" ", "").replace("-", "").replace("'", "").replace("\u00ad", "")
+        _s_last_stripped = unicodedata.normalize('NFKD', _s_last_stripped).encode('ascii', 'ignore').decode('ascii')
+        clean_key = clean_ligatures(_s_last_stripped)
 
         if clean_key not in student_map:
             student_map[clean_key] = []
@@ -1484,6 +1484,31 @@ def extract_photos_geometric(photo_pdf_path, df):
             images = page.images
             claimed_images = set()
 
+            # Pre-process: merge words ending with '-' with the next word,
+            # even when they fall on different lines in the PDF. This handles
+            # hyphenated surnames like "Duskett- McDann" where the PDF renders
+            # a space after the hyphen (or wraps onto the next line).
+            _merged = []
+            _skip = False
+            for _wi, _w in enumerate(words):
+                if _skip:
+                    _skip = False
+                    continue
+                if _w['text'].rstrip().endswith('-') and _wi + 1 < len(words):
+                    _nw = words[_wi + 1]
+                    if _nw['top'] - _w['top'] < 35:  # within ~2 line heights
+                        _merged.append({
+                            'text':   _w['text'].rstrip() + _nw['text'],
+                            'top':    _w['top'],
+                            'bottom': max(_w['bottom'], _nw['bottom']),
+                            'x0':     _w['x0'],
+                            'x1':     max(_w['x1'], _nw['x1']),
+                        })
+                        _skip = True
+                        continue
+                _merged.append(_w)
+            words = _merged
+
             print(f"[DEBUG] Found {len(words)} words and {len(images)} images on page.")
 
             # ----------------------------------------------------------
@@ -1507,7 +1532,11 @@ def extract_photos_geometric(photo_pdf_path, df):
                     # Build key
                     raw_text = "".join(w['text'] for w in phrase_objs).lower()
                     text = clean_ligatures(raw_text)
-                    text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "")
+                    text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "").replace("\u00ad", "")
+                    # Strip hidden Unicode (soft hyphens, zero-width chars, non-ASCII
+                    # glyphs that differ visually but differ in codepoint). NFKD
+                    # decomposes then ASCII encoding drops anything non-ASCII.
+                    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
 
                     if text not in student_map:
                         continue
@@ -2681,7 +2710,6 @@ if t2 is not None:
                 opt_dob   = st.checkbox("Date of birth", value=True)
                 opt_tutor = st.checkbox("Tutor",         value=True)
                 opt_sid   = st.checkbox("Student ID",    value=True)
-                opt_sec_home = st.checkbox("Home contacts", value=True)
 
                 has_swimming   = 'swimming_csv' in st.session_state
                 has_dietary    = 'dietary_csv' in st.session_state
@@ -2700,6 +2728,7 @@ if t2 is not None:
                 opt_sec_emerg = st.checkbox("Emergency contacts",          value=True)
                 opt_sec_docs  = st.checkbox("Medical contacts (doctors)",  value=True)
                 opt_sec_learn = st.checkbox("Learning & support",          value=True)
+                opt_sec_home  = st.checkbox("Home contacts",               value=True)
 
             # ── Step 5: Sort & output ─────────────────────────────────────────────
             st.markdown('<div class="section-head">Step 5 — Sort & output</div>', unsafe_allow_html=True)
