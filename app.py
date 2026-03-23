@@ -1449,9 +1449,9 @@ def extract_photos_geometric(photo_pdf_path, df):
         s_roll  = str(row[COLS['rollgroup']]).strip().lower()
 
         # Clean the key the same way we'll clean PDF text:
-        _s_last_stripped = s_last.replace(" ", "").replace("-", "").replace("'", "").replace("\u00ad", "")
-        _s_last_stripped = unicodedata.normalize('NFKD', _s_last_stripped).encode('ascii', 'ignore').decode('ascii')
-        clean_key = clean_ligatures(_s_last_stripped)
+        clean_key = clean_ligatures(
+            s_last.replace(" ", "").replace("-", "").replace("'", "")
+        )
 
         if clean_key not in student_map:
             student_map[clean_key] = []
@@ -1484,31 +1484,6 @@ def extract_photos_geometric(photo_pdf_path, df):
             images = page.images
             claimed_images = set()
 
-            # Pre-process: merge words ending with '-' with the next word,
-            # even when they fall on different lines in the PDF. This handles
-            # hyphenated surnames like "Duskett- McDann" where the PDF renders
-            # a space after the hyphen (or wraps onto the next line).
-            _merged = []
-            _skip = False
-            for _wi, _w in enumerate(words):
-                if _skip:
-                    _skip = False
-                    continue
-                if _w['text'].rstrip().endswith('-') and _wi + 1 < len(words):
-                    _nw = words[_wi + 1]
-                    if _nw['top'] - _w['top'] < 35:  # within ~2 line heights
-                        _merged.append({
-                            'text':   _w['text'].rstrip() + _nw['text'],
-                            'top':    _w['top'],
-                            'bottom': max(_w['bottom'], _nw['bottom']),
-                            'x0':     _w['x0'],
-                            'x1':     max(_w['x1'], _nw['x1']),
-                        })
-                        _skip = True
-                        continue
-                _merged.append(_w)
-            words = _merged
-
             print(f"[DEBUG] Found {len(words)} words and {len(images)} images on page.")
 
             # ----------------------------------------------------------
@@ -1524,19 +1499,41 @@ def extract_photos_geometric(photo_pdf_path, df):
 
                     phrase_objs = words[i : i + length]
 
-                    # SAME-LINE GUARD
+                    # SAME-LINE GUARD — with wrapped-surname relaxation.
+                    # Multi-word surnames (e.g. "Jarretto Handerstaay") and
+                    # hyphenated names with a space ("Duskett- McDann") can
+                    # wrap onto the next line in a narrow photo-label column.
+                    # In those cases the words' `top` values differ by one
+                    # full line height (~12 px), exceeding SAME_LINE_TOL=8
+                    # and causing a missed match.
+                    # For multi-word phrases we allow the relaxed tolerance
+                    # when the words stay inside the same narrow column
+                    # (x-centre spread < 70 px) and appear in reading order.
                     tops = [w['top'] for w in phrase_objs]
-                    if max(tops) - min(tops) > SAME_LINE_TOL:
-                        continue
+                    vertical_spread = max(tops) - min(tops)
+                    if vertical_spread > SAME_LINE_TOL:
+                        if length > 1:
+                            # Are all words horizontally within the same narrow column?
+                            x_centres = [(w['x0'] + w['x1']) / 2 for w in phrase_objs]
+                            same_col   = (max(x_centres) - min(x_centres)) < 70
+                            # Also allow when the first word ends in '-' (hyphenated wrap)
+                            is_hyphen_wrap = phrase_objs[0]['text'].rstrip().endswith('-')
+                            # Words must appear in descending / non-reversed order (top-to-bottom)
+                            in_order = all(
+                                phrase_objs[j]['top'] <= phrase_objs[j+1]['top'] + 5
+                                for j in range(len(phrase_objs) - 1)
+                            )
+                            if (same_col or is_hyphen_wrap) and in_order and vertical_spread <= 22:
+                                pass  # allow this wrapped multi-word phrase
+                            else:
+                                continue
+                        else:
+                            continue
 
                     # Build key
                     raw_text = "".join(w['text'] for w in phrase_objs).lower()
                     text = clean_ligatures(raw_text)
-                    text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "").replace("\u00ad", "")
-                    # Strip hidden Unicode (soft hyphens, zero-width chars, non-ASCII
-                    # glyphs that differ visually but differ in codepoint). NFKD
-                    # decomposes then ASCII encoding drops anything non-ASCII.
-                    text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('ascii')
+                    text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "")
 
                     if text not in student_map:
                         continue
