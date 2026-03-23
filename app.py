@@ -1456,27 +1456,12 @@ def extract_photos_geometric(photo_pdf_path, df):
         if clean_key not in student_map:
             student_map[clean_key] = []
 
-        entry = {
+        student_map[clean_key].append({
             "id":        s_id,
             "roll":      s_roll,
             "first":     s_first,
             "orig_last": s_last,
-        }
-        student_map[clean_key].append(entry)
-
-        # For multi-part surnames (hyphenated or space-separated), also register
-        # the reversed word order. Some photo PDFs list name parts in a different
-        # order to the student list CSV (e.g. "Handerstaay Jarretto" vs
-        # "Jarretto Handerstaay"). Registering both ensures either order matches.
-        parts = re.split(r'[\s\-]+', s_last.strip())
-        if len(parts) >= 2:
-            reversed_key = clean_ligatures("".join(reversed(parts)))
-            if reversed_key != clean_key:
-                if reversed_key not in student_map:
-                    student_map[reversed_key] = []
-                if entry not in student_map[reversed_key]:
-                    student_map[reversed_key].append(entry)
-
+        })
         total_students += 1
 
     print(f"[DEBUG] Loaded {total_students} students ({len(student_map)} unique surnames).")
@@ -1519,14 +1504,10 @@ def extract_photos_geometric(photo_pdf_path, df):
                     if max(tops) - min(tops) > SAME_LINE_TOL:
                         continue
 
-                    # Build key — skip standalone punctuation tokens (e.g. "-" emitted
-                    # separately when a hyphenated name has a space after the hyphen)
-                    sig_words = [w for w in phrase_objs if re.search(r'[a-zA-Z0-9]', w['text'])]
-                    if not sig_words:
-                        continue
-                    raw_text = "".join(w['text'] for w in sig_words).lower()
+                    # Build key
+                    raw_text = "".join(w['text'] for w in phrase_objs).lower()
                     text = clean_ligatures(raw_text)
-                    text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "").replace(" ", "")
+                    text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "")
 
                     if text not in student_map:
                         continue
@@ -2700,6 +2681,7 @@ if t2 is not None:
                 opt_dob   = st.checkbox("Date of birth", value=True)
                 opt_tutor = st.checkbox("Tutor",         value=True)
                 opt_sid   = st.checkbox("Student ID",    value=True)
+                opt_sec_home = st.checkbox("Home contacts", value=True)
 
                 has_swimming   = 'swimming_csv' in st.session_state
                 has_dietary    = 'dietary_csv' in st.session_state
@@ -2715,7 +2697,6 @@ if t2 is not None:
             with col2:
                 st.markdown('<div class="options-card-title">Profile sections</div>', unsafe_allow_html=True)
                 opt_sec_med   = st.checkbox("Medical information",         value=True)
-                opt_sec_home  = st.checkbox("Home contacts",               value=True)
                 opt_sec_emerg = st.checkbox("Emergency contacts",          value=True)
                 opt_sec_docs  = st.checkbox("Medical contacts (doctors)",  value=True)
                 opt_sec_learn = st.checkbox("Learning & support",          value=True)
