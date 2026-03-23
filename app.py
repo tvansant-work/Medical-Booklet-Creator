@@ -1484,6 +1484,35 @@ def extract_photos_geometric(photo_pdf_path, df):
             images = page.images
             claimed_images = set()
 
+            # ── Hyphenated-surname patch ──────────────────────────────────
+            # When a surname like "Duskett-McDann" is rendered in the PDF
+            # with a space after the hyphen ("Duskett- McDann"), pdfplumber
+            # extracts two separate word objects.  If those words wrap onto
+            # different lines in the narrow photo label column their `top`
+            # values diverge and the SAME_LINE_TOL guard rejects the pair.
+            # Fix: scan for any word ending in '-' and inject a single
+            # synthetic merged word (word[i].text + word[i+1].text, no
+            # space) into the word list right after word[i].  The length=1
+            # path then matches it without any same-line check at all.
+            # Original words are kept — nothing else in the list changes.
+            _extra = []
+            for _wi in range(len(words) - 1):
+                _w  = words[_wi]
+                _wn = words[_wi + 1]
+                if _w['text'].rstrip().endswith('-'):
+                    _synthetic = {
+                        'text':   _w['text'].rstrip() + _wn['text'],
+                        'top':    _w['top'],
+                        'bottom': max(_w['bottom'], _wn['bottom']),
+                        'x0':     _w['x0'],
+                        'x1':     max(_w['x1'], _wn['x1']),
+                    }
+                    print(f"  [HyphenPatch] synthetic word: {repr(_synthetic['text'])}")
+                    _extra.append((_wi + 1, _synthetic))
+            # Insert in reverse order so earlier indices stay valid
+            for _pos, _syn in reversed(_extra):
+                words.insert(_pos, _syn)
+
             print(f"[DEBUG] Found {len(words)} words and {len(images)} images on page.")
 
             # ----------------------------------------------------------
