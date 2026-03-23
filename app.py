@@ -55,12 +55,6 @@ if 'group_results' not in st.session_state:
     st.session_state.group_results = None  # Stores last group creator results
 if 'group_email_input' not in st.session_state:
     st.session_state.group_email_input = ""
-if 'seqta_contact_matched' not in st.session_state:
-    st.session_state.seqta_contact_matched = {}
-if 'seqta_contact_unmatched' not in st.session_state:
-    st.session_state.seqta_contact_unmatched = []
-if 'seqta_contact_manual' not in st.session_state:
-    st.session_state.seqta_contact_manual = {}
 import pandas as pd
 import zipfile
 import yaml
@@ -68,7 +62,7 @@ import urllib.parse
 import re
 import base64
 import pdfplumber
-import unicodedata
+import difflib
 import requests
 from io import BytesIO
 from PIL import Image
@@ -549,179 +543,6 @@ def parse_home_contacts(row):
         # If anything goes wrong, return empty structure
         print(f"Error parsing home contacts: {e}")
         return {"contacts": [], "home_address": "", "home_phone": ""}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SEQTA CONTACT PDF PARSER
-# ─────────────────────────────────────────────────────────────────────────────
-
-_SEQTA_LIG = {
-    '\ufb00':'ff','\ufb01':'fi','\ufb02':'fl','\ufb03':'ffi','\ufb04':'ffl',
-    '\ufb05':'st','\ufb06':'st','\ue000':'tt','\ue001':'ti','\ue003':'tt',
-    '\u02a6':'tt','\uf001':'fi','\uf002':'fl',
-}
-
-def _sc(text):
-    if not isinstance(text, str): return text
-    for k,v in _SEQTA_LIG.items(): text = text.replace(k,v)
-    out = []
-    for ch in text:
-        cp = ord(ch)
-        if 0xE000 <= cp <= 0xF8FF:
-            d = unicodedata.normalize('NFKD', ch)
-            out.append(d if d != ch else '')
-        else:
-            out.append(ch)
-    return unicodedata.normalize('NFC', ''.join(out))
-
-_SC_STU=165; _SC_DOB=225; _SC_CON=555; _SC_YT=4
-_SC_DOB_RE = re.compile(r'^\d{1,2}/\d{2}/\d{2,4}$')
-_SC_GREL   = re.compile(r'^(Mother|Father|Guardian|Parent|Carer|Step|Uncle|Aunt|Grand|Relation)',re.IGNORECASE)
-
-def _sc_col(x): 
-    return 'student' if x<_SC_STU else 'dob' if x<_SC_DOB else 'contacts' if x<_SC_CON else 'medical'
-
-def _sc_names(page):
-    lines={}
-    for ch in page.chars:
-        if ch['x0']>=_SC_STU or not ch['text']: continue
-        y=round(ch['top']/_SC_YT)*_SC_YT
-        lines.setdefault(y,[]).append((ch['x0'],ch['text']))
-    out={}
-    for y,chars in lines.items():
-        chars.sort(key=lambda c:c[0])
-        t=_sc(''.join(c[1] for c in chars)).strip()
-        if t: out[y]=t
-    return out
-
-def _sc_contact_lines(words):
-    words=sorted(words,key=lambda w:(w['top'],w['x0']))
-    lines=[]
-    for w in words:
-        col=_sc_col(w['x0'])
-        if col not in ('dob','contacts'): continue
-        t=_sc(w['text'])
-        placed=False
-        for line in reversed(lines):
-            if abs(line['y']-w['top'])<=_SC_YT:
-                line[col]=(line[col]+' '+t).strip(); placed=True; break
-        if not placed:
-            e={'y':w['top'],'dob':'','contacts':''}; e[col]=t; lines.append(e)
-    return lines
-
-def _sc_parse_contacts(lines):
-    r={"home_address":"","home_phone":"","home_mobile":"","guardians":[]}
-    af=hf=False; cur=None
-    def _sv():
-        if cur is not None: r["guardians"].append(cur)
-    for line in lines:
-        line=line.strip()
-        if not line: continue
-        if _SC_GREL.match(line):
-            _sv()
-            parts=line.split(None,1); rel=parts[0].title(); rest=parts[1].strip() if len(parts)>1 else ""
-            mm=re.search(r'Mobile:\s*([\d\s\+\(\)]+)',rest,re.IGNORECASE)
-            cur={"relationship":rel,"name":rest[:mm.start()].strip() if mm else rest,
-                 "mobile":mm.group(1).strip() if mm else "","home":"","work":""}
-            continue
-        if cur is not None and re.search(r'(?:Home:|Work:|Mobile:)',line,re.IGNORECASE):
-            m=re.search(r'Mobile:\s*([\d\s\+\(\)]+)',line,re.IGNORECASE)
-            if m and not cur["mobile"]: cur["mobile"]=m.group(1).strip()
-            m=re.search(r'(?<!\w)Home:\s*([\d\s\+\(\)]+)',line,re.IGNORECASE)
-            if m: cur["home"]=m.group(1).strip()
-            m=re.search(r'Work:\s*([\d\s\+\(\)]+)',line,re.IGNORECASE)
-            if m: cur["work"]=m.group(1).strip()
-            continue
-        if not hf and re.search(r'(?<!\w)Home:',line,re.IGNORECASE):
-            hm=re.search(r'(?<!\w)Home:\s*([\d\s\+\(\)]*)',line,re.IGNORECASE)
-            mm=re.search(r'Mobile:\s*([\d\s\+\(\)]+)',line,re.IGNORECASE)
-            if hm: r["home_phone"]=hm.group(1).strip()
-            if mm: r["home_mobile"]=mm.group(1).strip()
-            hf=True; continue
-        if not af:
-            r["home_address"]=line; af=True
-    _sv(); return r
-
-def _sc_parse_name(raw):
-    r={"surname":"","first_name":"","preferred":""}
-    t=raw.strip()
-    if not t: return r
-    pm=re.search(r'\(([^)]+)\)',t); pref=pm.group(1).strip() if pm else ""
-    c=re.sub(r'\([^)]*\)','',t).strip()
-    if ',' in c:
-        p=c.split(',',1); sur=p[0].strip(); first=p[1].strip().split()[0] if p[1].strip() else ""
-    else:
-        tok=c.split(); sur=tok[0] if tok else ""; first=tok[1] if len(tok)>1 else ""
-    r["surname"]=sur; r["first_name"]=first; r["preferred"]=pref if pref else first
-    return r
-
-def parse_seqta_contact_pdf_app(pdf_file):
-    records=[]
-    if hasattr(pdf_file,"seek"): pdf_file.seek(0)
-    with pdfplumber.open(pdf_file) as pdf:
-        for page in pdf.pages:
-            words=page.extract_words(x_tolerance=3,y_tolerance=3)
-            lines=_sc_contact_lines(words)
-            names=_sc_names(page)
-            anchors=[(l['y'],l['dob'].strip()) for l in lines if _SC_DOB_RE.match(l['dob'].strip())]
-            for idx,(dob_y,dob_val) in enumerate(anchors):
-                end_y=anchors[idx+1][0] if idx+1<len(anchors) else page.height
-                name_raw=''; best=999
-                for y,text in names.items():
-                    d=abs(y-dob_y)
-                    if d<=8 and d<best and text.lower() not in ('student','dob','contacts'):
-                        name_raw=text; best=d
-                clns=[l['contacts'] for l in lines if l['y']>=dob_y-2 and l['y']<end_y-2 and l['contacts']]
-                if not name_raw: continue
-                ni=_sc_parse_name(name_raw); ci=_sc_parse_contacts(clns)
-                sur=ni["surname"].strip(); first=ni["first_name"].strip()
-                if not sur or (len(sur)<=2 and not first): continue
-                records.append({**ni,**ci,"dob":dob_val,"_raw_name":name_raw,"_raw_contacts":"\n".join(clns)})
-    return records
-
-def match_seqta_contacts_app(pdf_records, df_students):
-    id_col=COLS.get('student_id','Code'); fn_col=COLS.get('first_name','First name'); sn_col=COLS.get('surname','Surname')
-    exact={}; sur_map={}
-    for _,row in df_students.iterrows():
-        sid=str(row.get(id_col,'')).strip(); first=str(row.get(fn_col,'')).strip().lower(); sur=str(row.get(sn_col,'')).strip().lower()
-        if not sid or not sur: continue
-        exact[(sur,first)]=sid; sur_map.setdefault(sur,[]).append(sid)
-    matched,unmatched,ambiguous={},{},[]  # use dict for ambiguous clarity
-    unmatched_list=[]
-    for rec in pdf_records:
-        sur=rec.get('surname','').strip().lower(); first=rec.get('first_name','').strip().lower(); pref=rec.get('preferred','').strip().lower()
-        sid=None
-        if (sur,first) in exact: sid=exact[(sur,first)]
-        elif pref and pref!=first and (sur,pref) in exact: sid=exact[(sur,pref)]
-        else:
-            cands=sur_map.get(sur,[])
-            if len(cands)==1: sid=cands[0]
-            elif len(cands)>1: ambiguous.append((rec,cands)); continue
-        if sid is None:
-            sur_tt=re.sub(r'ti','tt',sur); first_tt=re.sub(r'ti','tt',first); pref_tt=re.sub(r'ti','tt',pref)
-            if sur_tt!=sur:
-                if (sur_tt,first_tt) in exact: sid=exact[(sur_tt,first_tt)]
-                elif pref_tt and pref_tt!=first_tt and (sur_tt,pref_tt) in exact: sid=exact[(sur_tt,pref_tt)]
-                else:
-                    cands=sur_map.get(sur_tt,[])
-                    if len(cands)==1: sid=cands[0]
-                    elif len(cands)>1: ambiguous.append((rec,cands)); continue
-        if sid: matched[sid]=rec
-        else: unmatched_list.append(rec)
-    return matched, unmatched_list, ambiguous
-
-def home_contacts_from_pdf(pdf_rec):
-    if not pdf_rec: return {"contacts":[],"home_address":"","home_phone":""}
-    contacts=[]
-    for g in pdf_rec.get("guardians",[]):
-        ph=g.get("mobile") or g.get("home") or ""
-        pc=re.sub(r'[^\d+]','',ph)
-        po={"display":ph,"link":f"tel:{pc}"} if pc else None
-        n=g.get("name","").strip()
-        if n: contacts.append({"name":n,"relation":g.get("relationship","Guardian"),"phone":po})
-    hp=pdf_rec.get("home_phone","") or pdf_rec.get("home_mobile","")
-    return {"contacts":contacts,"home_address":pdf_rec.get("home_address",""),"home_phone":hp}
-
 
 def parse_emergency_contact_names(emergency_text):
     """
@@ -1466,6 +1287,28 @@ def extract_photos_geometric(photo_pdf_path, df):
 
     print(f"[DEBUG] Loaded {total_students} students ({len(student_map)} unique surnames).")
 
+    # Pre-compute sorted key list for fuzzy surname matching
+    _all_surname_keys = sorted(student_map.keys())
+
+    def _fuzzy_surname_lookup(text, cutoff=0.82):
+        """
+        Fuzzy fallback when exact surname lookup fails.
+        Catches 1-character differences caused by the photo PDF font encoding
+        incorrect unicode values for some letters (W, R, M, V etc.).
+        cutoff=0.82 catches single-char differences in names of 6+ chars.
+        """
+        if len(text) < 4:
+            return None
+        best_key, best_ratio = None, 0.0
+        for key in _all_surname_keys:
+            ratio = difflib.SequenceMatcher(None, text, key).ratio()
+            if ratio > best_ratio:
+                best_ratio, best_key = ratio, key
+        if best_ratio >= cutoff:
+            print(f"  [FUZZY] '{text}' → '{best_key}' (ratio={best_ratio:.2f})")
+            return best_key
+        return None
+
     # ------------------------------------------------------------------
     # 2. Constants
     # ------------------------------------------------------------------
@@ -1510,8 +1353,13 @@ def extract_photos_geometric(photo_pdf_path, df):
                     text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "")
 
                     if text not in student_map:
-                        continue
-                    
+                        # Fuzzy fallback: photo PDF font mis-encodes some letters
+                        # (e.g. W→P, R→D/F/G, M→H, V→H) — find closest surname
+                        _fuzzy_key = _fuzzy_surname_lookup(text)
+                        if _fuzzy_key is None:
+                            continue
+                        text = _fuzzy_key
+
                     # --- FOUND A SURNAME MATCH ---
                     candidates = student_map[text]
                     
@@ -2167,7 +2015,7 @@ if t1 is not None:
     # ── Required documents ────────────────────────────────────────────────────
     st.markdown('<div class="section-head">Required — from Seqta</div>', unsafe_allow_html=True)
 
-    col_a, col_b, col_b2 = st.columns(3)
+    col_a, col_b = st.columns(2)
     with col_a:
         st.markdown(f"""
         <div class="upload-card">
@@ -2188,23 +2036,20 @@ if t1 is not None:
         """, unsafe_allow_html=True)
         photos = st.file_uploader("Student Photos PDF", type="pdf", label_visibility="collapsed")
 
-    with col_b2:
-        st.markdown(f"""
-        <div class="upload-card">
-          <div class="upload-card-label">Excursion Student Info PDF</div>
-          <div class="upload-card-desc">The "Excursion contact &amp; medical info" report from Seqta — provides home address, phone numbers and parent/guardian contacts.</div>
-          <a class="seqta-link" href="{SEQTA_URL}" target="_blank">↗ Open in Seqta</a>
-        </div>
-        """, unsafe_allow_html=True)
-        seqta_contact_pdf = st.file_uploader("Excursion Student Info PDF", type="pdf", label_visibility="collapsed", key="seqta_contact_pdf_uploader")
-
     # ── Optional documents ────────────────────────────────────────────────────
     st.markdown('<div class="section-head">Optional — from Paperly forms</div>', unsafe_allow_html=True)
 
-    contact_csv = None  # replaced by Excursion Student Info PDF
-
     col_c, col_d, col_e = st.columns(3)
     with col_c:
+        st.markdown("""
+        <div class="upload-card optional">
+          <div class="upload-card-label">Attendance CSV</div>
+          <div class="upload-card-desc">Adds home contacts and addresses to each profile.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        contact_csv = st.file_uploader("Attendance CSV", type="csv", label_visibility="collapsed")
+
+    with col_d:
         st.markdown("""
         <div class="upload-card optional">
           <div class="upload-card-label">Swimming Ability CSV</div>
@@ -2213,7 +2058,7 @@ if t1 is not None:
         """, unsafe_allow_html=True)
         swimming_csv = st.file_uploader("Swimming Ability CSV", type="csv", label_visibility="collapsed")
 
-    with col_d:
+    with col_e:
         st.markdown("""
         <div class="upload-card optional">
           <div class="upload-card-label">Dietary Requirements CSV</div>
@@ -2222,7 +2067,8 @@ if t1 is not None:
         """, unsafe_allow_html=True)
         dietary_csv = st.file_uploader("Dietary Requirements CSV", type="csv", label_visibility="collapsed")
 
-    with col_e:
+    col_f, col_f2, col_f3 = st.columns(3)
+    with col_f:
         st.markdown("""
         <div class="upload-card optional">
           <div class="upload-card-label">Photo Permissions CSV</div>
@@ -2231,37 +2077,41 @@ if t1 is not None:
         """, unsafe_allow_html=True)
         photo_perm_csv = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed")
 
-    # ── File processing ────────────────────────────────────────────────────────
+    # ── File processing (logic unchanged) ─────────────────────────────────────
     if csv:
         df_temp = pd.read_csv(csv).fillna("")
+        if contact_csv:
+            try:
+                contact_df = pd.read_csv(contact_csv).fillna("")
+                st.session_state.contact_csv_df = contact_df
+                c_map = CONFIG.get('contact_file_mappings', {})
+                id_col = COLS['student_id']
+                join_key = c_map.get('join_key', 'ID')
+                df_temp[id_col] = df_temp[id_col].astype(str).str.strip()
+                contact_df[join_key] = contact_df[join_key].astype(str).str.strip()
+                contact_cols_needed = [
+                    join_key,
+                    c_map.get('sc1_name_pref', 'SC1 Preferred'),
+                    c_map.get('sc1_name_sur', 'SC1 Surname'),
+                    c_map.get('sc1_mobile', 'SC1 Mobile'),
+                    c_map.get('sc2_name_pref', 'SC2 Preferred'),
+                    c_map.get('sc2_name_sur', 'SC2 Surname'),
+                    c_map.get('sc2_mobile', 'SC2 Mobile'),
+                    c_map.get('address', 'Contact Address'),
+                    c_map.get('home_phone', 'Home Phone')
+                ]
+                contact_cols_to_merge = [col for col in contact_cols_needed if col in contact_df.columns]
+                contact_df_subset = contact_df[contact_cols_to_merge]
+                df_temp = pd.merge(df_temp, contact_df_subset, left_on=id_col, right_on=join_key, how='left')
+                print(f"\n=== CONTACT MERGE DEBUG ===")
+                print(f"Columns after merge: {list(df_temp.columns)}")
+                print(f"Looking for: SC1 Preferred, SC1 Surname, SC2 Preferred, SC2 Surname")
+                st.success(f"✅ Merged contacts for {len(contact_df)} students")
+            except Exception as e:
+                st.error(f"Error merging contacts: {e}")
         st.session_state.df = df_temp
-        st.session_state.df_final = df_temp
+        st.session_state.df_final = st.session_state.df
         st.success("✅ Student list loaded")
-
-    # ── Seqta Contact PDF ──────────────────────────────────────────────────────
-    if seqta_contact_pdf and "df_final" in st.session_state:
-        try:
-            with st.spinner("Parsing Excursion Student Info PDF…"):
-                _pdf_recs = parse_seqta_contact_pdf_app(seqta_contact_pdf)
-            _sc_matched, _sc_unmatched, _sc_ambiguous = match_seqta_contacts_app(
-                _pdf_recs, st.session_state.df_final
-            )
-            st.session_state.seqta_contact_matched   = _sc_matched
-            # Store unmatched + ambiguous together with an index for manual matching
-            _all_unmatched = _sc_unmatched + [r for r, _ in _sc_ambiguous]
-            st.session_state.seqta_contact_unmatched = [
-                dict(rec, _index=i) for i, rec in enumerate(_all_unmatched)
-            ]
-            st.session_state.seqta_contact_manual = {}
-            n_m = len(_sc_matched); n_u = len(_all_unmatched)
-            if n_u == 0:
-                st.success(f"✅ Excursion PDF: all {n_m} students matched")
-            else:
-                st.warning(f"⚠️ Excursion PDF: {n_m} matched · {n_u} need manual matching in Process tab")
-        except Exception as e:
-            st.error(f"Error parsing Excursion PDF: {e}")
-    elif seqta_contact_pdf and "df_final" not in st.session_state:
-        st.warning("Upload the Student List CSV at the same time as the Excursion PDF.")
 
     if swimming_csv:
         st.session_state.swimming_csv = swimming_csv
@@ -2284,14 +2134,14 @@ if t1 is not None:
     # ── Navigate to Process & Generate ───────────────────────────────────────
     st.markdown("<br>", unsafe_allow_html=True)
     st.divider()
-    ready = "df_final" in st.session_state and "photo_pdf" in st.session_state and "seqta_contact_matched" in st.session_state
+    ready = "df_final" in st.session_state and "photo_pdf" in st.session_state
     if ready:
         if st.button("\u25b6\u2002 Process & Generate \u2192", type="primary", use_container_width=True):
             st.session_state._active_tab = 1
             st.rerun()
     else:
         st.button("\u25b6\u2002 Process & Generate \u2192", type="primary", use_container_width=True, disabled=True)
-        st.caption("Upload all three required files above to continue.")
+        st.caption("Upload the required files above to continue.")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 2 — PROCESS & GENERATE
@@ -2418,32 +2268,6 @@ if t2 is not None:
                             st.divider()
                 else:
                     st.success(f"✅ All {total_diet_matched} dietary records matched automatically")
-
-            # ── Seqta contact manual matching ──────────────────────────────────
-            _sc_unmatched = st.session_state.get('seqta_contact_unmatched', [])
-            _sc_matched   = st.session_state.get('seqta_contact_matched', {})
-            if _sc_unmatched:
-                with st.expander(f"⚠️  {len(_sc_unmatched)} contact record(s) need manual matching  ({len(_sc_matched)} matched automatically)", expanded=True):
-                    st.caption("These students were found in the Excursion PDF but could not be automatically matched. Assign each to the correct student.")
-                    for _item in _sc_unmatched:
-                        _idx = _item.get('_index', id(_item))
-                        _c1, _c2 = st.columns([2, 3])
-                        with _c1:
-                            st.markdown(f"**PDF name:** {_item.get('surname','')} {_item.get('first_name','')}")
-                            if _item.get('home_address'):
-                                st.caption(f"📍 {_item['home_address']}")
-                            for _g in _item.get('guardians', []):
-                                _phones = ' · '.join(filter(None, [_g.get('mobile'), _g.get('home'), _g.get('work')]))
-                                st.caption(f"{_g.get('relationship','')}: {_g.get('name','')}  {_phones}")
-                        with _c2:
-                            _sel = st.selectbox("Assign to student:", options=student_options, key=f"sc_sel_{_idx}")
-                            if _sel != "(Skip)":
-                                st.session_state.seqta_contact_manual[_idx] = name_to_id_map[_sel]
-                            elif _idx in st.session_state.seqta_contact_manual:
-                                del st.session_state.seqta_contact_manual[_idx]
-                        st.divider()
-            elif _sc_matched:
-                st.success(f"✅ All {len(_sc_matched)} contact records matched automatically")
 
             # Photo permissions summary
             if 'photo_perm_csv' in st.session_state:
@@ -2681,7 +2505,6 @@ if t2 is not None:
                 opt_dob   = st.checkbox("Date of birth", value=True)
                 opt_tutor = st.checkbox("Tutor",         value=True)
                 opt_sid   = st.checkbox("Student ID",    value=True)
-                opt_sec_home = st.checkbox("Home contacts", value=True)
 
                 has_swimming   = 'swimming_csv' in st.session_state
                 has_dietary    = 'dietary_csv' in st.session_state
@@ -2697,6 +2520,7 @@ if t2 is not None:
             with col2:
                 st.markdown('<div class="options-card-title">Profile sections</div>', unsafe_allow_html=True)
                 opt_sec_med   = st.checkbox("Medical information",         value=True)
+                opt_sec_home  = st.checkbox("Home contacts",               value=True)
                 opt_sec_emerg = st.checkbox("Emergency contacts",          value=True)
                 opt_sec_docs  = st.checkbox("Medical contacts (doctors)",  value=True)
                 opt_sec_learn = st.checkbox("Learning & support",          value=True)
@@ -2874,16 +2698,7 @@ if t2 is not None:
                     raw_emerg = str(r.get(COLS['emergency_notes'], ""))
                     parsed_med  = parse_medical_text(raw_med)
                     parsed_con  = parse_emergency_contacts(raw_emerg)
-                    # Use Seqta PDF contacts (compulsory); fall back to CSV if missing
-                    _pdf_rec = st.session_state.get('seqta_contact_matched', {}).get(sid)
-                    if not _pdf_rec:
-                        for _mi, _msid in st.session_state.get('seqta_contact_manual', {}).items():
-                            if _msid == sid:
-                                for _u in st.session_state.get('seqta_contact_unmatched', []):
-                                    if _u.get('_index') == _mi:
-                                        _pdf_rec = _u; break
-                                break
-                    parsed_home = home_contacts_from_pdf(_pdf_rec) if _pdf_rec else parse_home_contacts(r)
+                    parsed_home = parse_home_contacts(r)
 
                     sections = []
                     layout = CONFIG["default_profile_layout"]
