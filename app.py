@@ -2875,7 +2875,14 @@ if t2 is not None:
                                 final_dietary_map[student_id] = item['dietary_req']
                                 break
 
-                final_photo_perm_map = st.session_state.get('photo_permissions_map', {}).copy()
+                # Re-run photo permissions matching at generate time so it always
+                # uses the latest session state (e.g. Excursion PDF guardian data
+                # that may have been uploaded after the last "Scan & Match Photos" run).
+                if 'photo_perm_csv' in st.session_state:
+                    final_photo_perm_map = match_photo_permissions(df_final, st.session_state.photo_perm_csv)
+                    st.session_state.photo_permissions_map = final_photo_perm_map
+                else:
+                    final_photo_perm_map = st.session_state.get('photo_permissions_map', {}).copy()
 
                 print(f"\n{'='*80}")
                 print("SWIMMING ABILITY MAP FOR PDF GENERATION")
