@@ -61,6 +61,10 @@ if 'seqta_contact_unmatched' not in st.session_state:
     st.session_state.seqta_contact_unmatched = []
 if 'seqta_contact_manual' not in st.session_state:
     st.session_state.seqta_contact_manual = {}
+if 'custom_groups' not in st.session_state:
+    st.session_state.custom_groups = []  # list of {'label': str, 'identifiers': [str]}
+if 'custom_groups_ungrouped_checked' not in st.session_state:
+    st.session_state.custom_groups_ungrouped_checked = False
 import pandas as pd
 import zipfile
 import yaml
@@ -103,6 +107,18 @@ except FileNotFoundError:
 
 COLS = CONFIG["column_mappings"]
 SEVERITY_KEYWORDS = CONFIG["severity_keywords"]
+
+# Roll group code → full display name. Unknown codes fall back to the raw value.
+ROLLGROUP_NAMES = {
+    "7M": "7 Mott",    "7B": "7 Backhouse", "7F": "7 Fry",
+    "7O": "7 Oats",    "7P": "7 Penn",       "7W": "7 Walker",
+    "8B": "8 Bracey",  "8R": "8 Rustin",     "8S": "8 Stowe",
+    "8P": "8 Preston", "8K": "8 Knight",     "8T": "8 Tuke",
+}
+
+def expand_rollgroup(code):
+    """Return full roll group name, or the raw code if not in the lookup."""
+    return ROLLGROUP_NAMES.get(str(code).strip(), str(code).strip())
 
 # ---------------- DATA DICTIONARIES ----------------
 LEARNING_CODES = {
@@ -2134,17 +2150,22 @@ if _active_feature == "booklet":
     _tab_labels = ["  🏠 Home  ", "  📋 Booklet Setup  ", "  ⚙️ Process & Generate  "]
     _tabs = st.tabs(_tab_labels)
     t0, t1, t2 = _tabs
-    t3 = None
+    t3 = t4 = None
 elif _active_feature == "group":
     _tab_labels = ["  🏠 Home  ", "  👥 Group Creator  "]
     _tabs = st.tabs(_tab_labels)
     t0, t3 = _tabs
-    t1 = t2 = None
+    t1 = t2 = t4 = None
+elif _active_feature == "custom_groups":
+    _tab_labels = ["  🏠 Home  ", "  🗂️ Custom Booklet Groups  "]
+    _tabs = st.tabs(_tab_labels)
+    t0, t4 = _tabs
+    t1 = t2 = t3 = None
 else:
     _tab_labels = ["  🏠 Home  "]
     _tabs = st.tabs(_tab_labels)
     t0 = _tabs[0]
-    t1 = t2 = t3 = None
+    t1 = t2 = t3 = t4 = None
 
 # ── Auto-tab-switch helper (injected as a hidden iframe via st.components) ────
 def _inject_tab_click(tab_index):
@@ -2180,6 +2201,11 @@ if st.session_state.get("_go_group"):
     st.session_state._go_group = False
     _inject_tab_click(1)
 
+# Auto-switch: → Custom Groups tab (index 1 when feature=custom_groups)
+if st.session_state.get("_go_custom_groups"):
+    st.session_state._go_custom_groups = False
+    _inject_tab_click(1)
+
 # Auto-switch: → Process & Generate tab (index 2 when feature=booklet)
 if st.session_state.get("_active_tab") == 1:
     st.session_state._active_tab = None
@@ -2194,7 +2220,7 @@ with t0:
     st.markdown("Choose a tool below to get started.")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    home_col1, home_col2 = st.columns(2)
+    home_col1, home_col2, home_col3 = st.columns(3)
 
     with home_col1:
         # Hidden marker lets CSS target and style this column's button as a card
@@ -2218,6 +2244,17 @@ with t0:
         ):
             st.session_state.active_feature = 'group'
             st.session_state._go_group = True
+            st.rerun()
+
+    with home_col3:
+        st.markdown('<span id="fc-customgroups-marker" style="display:none"></span>', unsafe_allow_html=True)
+        if st.button(
+            "🗂️\n\n**Custom Booklet Groups**\n\nSplit any student list into named groups using student IDs or email addresses — generate a separate or combined booklet per group.",
+            use_container_width=True,
+            key="home_customgroups_btn"
+        ):
+            st.session_state.active_feature = 'custom_groups'
+            st.session_state._go_custom_groups = True
             st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -2910,10 +2947,52 @@ if t2 is not None:
 
                 all_records = []
                 total = len(df_final)
-                prog = st.progress(0)
+
+                # ── Animated adventure progress bar ──────────────────────────
+                import time as _time
+                _gen_start = _time.time()
+                _adventures = [
+                    ("🧗", "Scaling the medical data cliff…"),
+                    ("🚣", "Paddling through emergency contacts…"),
+                    ("🏕️", "Setting up camp in the learning support section…"),
+                    ("🤿", "Diving into swimming ability records…"),
+                    ("🧭", "Navigating the photo permissions maze…"),
+                    ("🎒", "Packing the final booklet…"),
+                ]
+                _prog_placeholder = st.empty()
+
+                def _render_progress(pct, elapsed_s, total_students):
+                    stage_idx = min(int(pct * len(_adventures)), len(_adventures) - 1)
+                    emoji, label = _adventures[stage_idx]
+                    bar_filled = int(pct * 30)
+                    bar_empty  = 30 - bar_filled
+                    bar_str    = "█" * bar_filled + "░" * bar_empty
+                    if pct > 0.02 and elapsed_s > 0:
+                        est_total = elapsed_s / pct
+                        remaining = max(0, est_total - elapsed_s)
+                        if remaining < 60:
+                            eta = f"~{int(remaining)+1}s left"
+                        else:
+                            eta = f"~{int(remaining/60)+1}m left"
+                    else:
+                        eta = "calculating…"
+                    done = int(pct * total_students)
+                    _prog_placeholder.markdown(
+                        f"""<div style="font-family:monospace;background:#f8f9fa;border:1px solid #dee2e6;
+                        border-radius:8px;padding:14px 18px;margin:8px 0;line-height:1.8">
+                        <div style="font-size:1.5rem;margin-bottom:4px">{emoji}</div>
+                        <div style="font-size:0.85rem;color:#495057;margin-bottom:6px">{label}</div>
+                        <div style="font-size:1.1rem;letter-spacing:1px;color:#1a7f6e">{bar_str}</div>
+                        <div style="font-size:0.78rem;color:#868e96;margin-top:4px">
+                            {done} / {total_students} students &nbsp;·&nbsp; {int(pct*100)}% &nbsp;·&nbsp; {eta}
+                        </div></div>""",
+                        unsafe_allow_html=True
+                    )
+                _render_progress(0, 0, total)
 
                 for idx, (_, r) in enumerate(df_final.iterrows()):
-                    prog.progress((idx+1)/total)
+                    _elapsed = _time.time() - _gen_start
+                    _render_progress((idx + 1) / total, _elapsed, total)
                     sid = str(r[COLS['student_id']])
                     link_id = re.sub(r'[^a-zA-Z0-9]', '', sid) or f"row{idx}"
 
@@ -2943,7 +3022,8 @@ if t2 is not None:
                     house = str(r.get(COLS.get('house', 'House'), '')).strip()
                     tutor = parse_tutor(str(r.get(COLS.get('general_notes', 'General notes'), '')))
                     year_lvl = str(r[COLS['year']])
-                    roll = str(r[COLS['rollgroup']])
+                    roll_raw = str(r[COLS['rollgroup']])
+                    roll = expand_rollgroup(roll_raw)  # full name e.g. "7 Mott"
 
                     raw_med   = str(r.get(COLS['medical_notes'], ""))
                     raw_emerg = str(r.get(COLS['emergency_notes'], ""))
@@ -3061,6 +3141,7 @@ if t2 is not None:
                     group_key = 'alpha'
 
                 if "Split" in output_mode:
+                    _prog_placeholder.empty()
                     status.write("Generating split PDFs…")
                     zip_buffer = BytesIO()
                     groups = {}
@@ -3078,6 +3159,7 @@ if t2 is not None:
                     st.download_button("⬇ Download ZIP", data=zip_buffer.getvalue(),
                                        file_name="Medical_Booklets.zip", mime="application/zip")
                 else:
+                    _prog_placeholder.empty()
                     status.write("Generating PDF…")
                     pdf_data = render_subset(all_records)
                     status.update(label="✅ Booklet ready", state="complete", expanded=False)
@@ -3286,6 +3368,431 @@ if t3 is not None:
             st.session_state.group_results = None
             st.session_state.group_email_input = ""
             st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — CUSTOM BOOKLET GROUPS
+# ═══════════════════════════════════════════════════════════════════════════════
+if t4 is not None:
+ with t4:
+
+    st.markdown('<div class="section-head">Custom Booklet Groups</div>', unsafe_allow_html=True)
+    st.markdown(
+        'Split any student list into named groups using student IDs or email addresses. '
+        'Generate a combined booklet or a separate PDF per group.',
+        unsafe_allow_html=True
+    )
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Step 1: Student list CSV ──────────────────────────────────────────────
+    st.markdown('<div class="section-head">Step 1 — Upload Student List CSV</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">'
+        'The same student list CSV from Seqta — used to look up students from IDs or emails.</p>',
+        unsafe_allow_html=True
+    )
+    cg_csv = st.file_uploader(
+        "Student List CSV for custom groups",
+        type="csv",
+        label_visibility="collapsed",
+        key="cg_csv_uploader"
+    )
+    if cg_csv is None and "df_final" in st.session_state:
+        st.caption("💡 A student list is already loaded from the Booklet Creator — it will be used automatically if no file is uploaded here.")
+
+    # Resolve which dataframe to use
+    _cg_df = None
+    if cg_csv is not None:
+        try:
+            cg_csv.seek(0)
+            _cg_df = pd.read_csv(cg_csv).fillna("")
+            st.session_state['cg_csv_df'] = _cg_df
+        except Exception as e:
+            st.error(f"Could not read CSV: {e}")
+    elif 'cg_csv_df' in st.session_state:
+        _cg_df = st.session_state['cg_csv_df']
+    elif "df_final" in st.session_state:
+        _cg_df = st.session_state.df_final
+
+    if _cg_df is not None:
+        st.success(f"✅ {len(_cg_df)} students loaded")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Step 2: Build groups ──────────────────────────────────────────────────
+    st.markdown('<div class="section-head">Step 2 — Define Groups</div>', unsafe_allow_html=True)
+    st.markdown(
+        '<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">'
+        'For each group, give it a label and paste student IDs or email addresses '
+        '(separated by spaces, commas, semicolons, newlines — any mix).</p>',
+        unsafe_allow_html=True
+    )
+
+    # ── Add a new group ───────────────────────────────────────────────────────
+    with st.expander("➕  Add a new group", expanded=len(st.session_state.custom_groups) == 0):
+        new_label = st.text_input("Group name", placeholder="e.g. Bus 1, Activity A, Mr Smith's Group", key="cg_new_label")
+        new_ids   = st.text_area(
+            "Student IDs or email addresses",
+            height=120,
+            placeholder="e.g.\n12345, 12346\nsmith.j@school.edu.au\n12347 12348",
+            key="cg_new_ids"
+        )
+        if st.button("Add Group", type="primary", key="cg_add_btn"):
+            if not new_label.strip():
+                st.warning("Please enter a group name.")
+            elif not new_ids.strip():
+                st.warning("Please paste some student IDs or emails.")
+            else:
+                tokens = re.split(r'[\s,;|\t]+', new_ids.strip())
+                tokens = [t.strip() for t in tokens if t.strip()]
+                st.session_state.custom_groups.append({
+                    "label": new_label.strip(),
+                    "identifiers": tokens
+                })
+                st.rerun()
+
+    # ── Show existing groups ──────────────────────────────────────────────────
+    if st.session_state.custom_groups:
+        st.markdown(f"**{len(st.session_state.custom_groups)} group(s) defined:**")
+        for gi, grp in enumerate(st.session_state.custom_groups):
+            gcol1, gcol2 = st.columns([5, 1])
+            with gcol1:
+                st.markdown(
+                    f"<div style='background:#f0f4ff;border:1px solid #c5cae9;border-radius:6px;"
+                    f"padding:8px 12px;margin-bottom:6px;font-size:0.88rem'>"
+                    f"<strong>{grp['label']}</strong> &nbsp;·&nbsp; "
+                    f"<span style='color:#5c6bc0'>{len(grp['identifiers'])} identifier(s)</span>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
+            with gcol2:
+                if st.button("🗑️ Remove", key=f"cg_remove_{gi}"):
+                    st.session_state.custom_groups.pop(gi)
+                    st.rerun()
+
+        if st.button("🗑️  Clear all groups", key="cg_clear_all"):
+            st.session_state.custom_groups = []
+            st.rerun()
+    else:
+        st.info("No groups defined yet — add one above.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Step 3: Check ungrouped students ─────────────────────────────────────
+    st.markdown('<div class="section-head">Step 3 — Check Ungrouped Students (optional)</div>', unsafe_allow_html=True)
+
+    if st.button("🔍  Find ungrouped students", key="cg_ungrouped_btn",
+                 disabled=(_cg_df is None or len(st.session_state.custom_groups) == 0)):
+        if _cg_df is not None and st.session_state.custom_groups:
+            id_col    = COLS.get('student_id', 'Code')
+            fname_col = COLS.get('first_name', 'First name')
+            sname_col = COLS.get('surname', 'Surname')
+
+            # Build email lookup
+            email_col = None
+            for candidate in ["Email", "email", "Email address", "Email Address", "Student email", "EmailAddress"]:
+                if candidate in _cg_df.columns:
+                    email_col = candidate
+                    break
+            if email_col is None:
+                for col in _cg_df.columns:
+                    if "email" in col.lower():
+                        email_col = col
+                        break
+
+            # Collect all identifiers across groups (lowered)
+            all_identifiers = set()
+            for grp in st.session_state.custom_groups:
+                for tok in grp['identifiers']:
+                    all_identifiers.add(tok.lower())
+
+            ungrouped = []
+            for _, row in _cg_df.iterrows():
+                sid   = str(row.get(id_col, '')).strip()
+                email = str(row.get(email_col, '')).strip().lower() if email_col else ''
+                fname = str(row.get(fname_col, '')).strip()
+                sname = str(row.get(sname_col, '')).strip()
+                if sid.lower() not in all_identifiers and (not email or email not in all_identifiers):
+                    ungrouped.append(f"{sname}, {fname} ({sid})")
+
+            st.session_state['cg_ungrouped'] = ungrouped
+            st.rerun()
+
+    if 'cg_ungrouped' in st.session_state:
+        ug = st.session_state['cg_ungrouped']
+        if ug:
+            st.warning(f"⚠️ {len(ug)} student(s) are not in any group:")
+            with st.expander(f"Show {len(ug)} ungrouped student(s)"):
+                for name in ug:
+                    st.markdown(f"<span style='font-size:0.82rem'>{name}</span>", unsafe_allow_html=True)
+        else:
+            st.success("✅ All students are assigned to a group.")
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Step 4: Generate ─────────────────────────────────────────────────────
+    st.markdown('<div class="section-head">Step 4 — Generate Booklets</div>', unsafe_allow_html=True)
+
+    cg_output_mode = st.radio(
+        "Output format:",
+        ["Separate PDF per group (ZIP)", "Single combined PDF with dividers"],
+        key="cg_output_mode"
+    )
+
+    can_generate = (
+        _cg_df is not None and
+        len(st.session_state.custom_groups) > 0 and
+        "df_final" in st.session_state  # need the full booklet data loaded
+    )
+
+    if not can_generate:
+        if "df_final" not in st.session_state:
+            st.warning("⚠️ The Booklet Creator data hasn't been loaded yet. Please go through the Booklet Setup and Process tabs first to load the full student data, then come back here.")
+        st.button("Generate Group Booklets", type="primary", disabled=True, key="cg_generate_btn")
+    else:
+        if st.button("Generate Group Booklets", type="primary", key="cg_generate_btn"):
+            df_full = st.session_state.df_final
+            id_col    = COLS.get('student_id', 'Code')
+            fname_col = COLS.get('first_name', 'First name')
+            sname_col = COLS.get('surname', 'Surname')
+
+            # Build email lookup from df_full
+            email_col = None
+            for candidate in ["Email", "email", "Email address", "Email Address", "Student email", "EmailAddress"]:
+                if candidate in _cg_df.columns:
+                    email_col = candidate
+                    break
+            if email_col is None:
+                for col in _cg_df.columns:
+                    if "email" in col.lower():
+                        email_col = col
+                        break
+
+            # Build sid → row index lookup for df_full
+            sid_to_idx = {}
+            email_to_idx = {}
+            for i, (_, row) in enumerate(df_full.iterrows()):
+                sid = str(row.get(id_col, '')).strip().lower()
+                if sid:
+                    sid_to_idx[sid] = i
+                if email_col and email_col in df_full.columns:
+                    em = str(row.get(email_col, '')).strip().lower()
+                    if em and em != 'nan':
+                        email_to_idx[em] = i
+
+            # Resolve each group's identifiers to df_full row indices
+            def resolve_group(identifiers):
+                indices = []
+                seen = set()
+                for tok in identifiers:
+                    t = tok.strip().lower()
+                    idx = sid_to_idx.get(t) or email_to_idx.get(t)
+                    if idx is not None and idx not in seen:
+                        indices.append(idx)
+                        seen.add(idx)
+                return indices
+
+            # Need the full rendering pipeline — reuse all session state from booklet tab
+            final_photo_map   = st.session_state.get('auto_matches', {}).copy()
+            for p, s in st.session_state.get('manual_selections', {}).items():
+                final_photo_map[s] = p
+
+            final_swimming_map = st.session_state.get('swimming_matched', {}).copy()
+            for swim_idx, student_id in st.session_state.get('swimming_manual_selections', {}).items():
+                for item in st.session_state.get('swimming_unmatched', []):
+                    if item['index'] == swim_idx:
+                        final_swimming_map[student_id] = item['ability']
+                        break
+
+            final_dietary_map = st.session_state.get('dietary_matched', {}).copy()
+            for dietary_idx, student_id in st.session_state.get('dietary_manual_selections', {}).items():
+                for item in st.session_state.get('dietary_unmatched', []):
+                    if item['index'] == dietary_idx:
+                        final_dietary_map[student_id] = item['dietary_req']
+                        break
+
+            if 'photo_perm_csv' in st.session_state:
+                final_photo_perm_map = match_photo_permissions(df_full, st.session_state.photo_perm_csv)
+            else:
+                final_photo_perm_map = st.session_state.get('photo_permissions_map', {}).copy()
+
+            env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
+            tpl = env.get_template("profiles.html")
+            display_opts = {
+                "year": True, "roll": True, "house": True,
+                "dob": True, "tutor": True, "sid": True,
+                "swimming": bool(final_swimming_map),
+                "dietary": bool(final_dietary_map),
+                "photo_perm": bool(final_photo_perm_map)
+            }
+
+            import time as _cg_time
+
+            def build_profile_obj(row, sid):
+                link_id   = re.sub(r'[^a-zA-Z0-9]', '', sid) or f"cg_{sid}"
+                fname     = row[COLS['first_name']]
+                sname     = row[COLS['surname']]
+                dob_raw   = str(row.get('Birth date', row.get('Birth Date', ''))).strip()
+                try: dob = datetime.strptime(dob_raw, '%Y-%m-%d').strftime('%d %b %Y')
+                except: dob = dob_raw
+                gender_raw = str(row.get('Gender', row.get('gender', ''))).strip()
+                gender_lower = gender_raw.lower()
+                if gender_lower == 'm': gender = 'Male'
+                elif gender_lower == 'f': gender = 'Female'
+                else: gender = gender_raw if gender_raw and gender_lower not in ('nan','') else ''
+                house     = str(row.get(COLS.get('house','House'), '')).strip()
+                tutor     = parse_tutor(str(row.get(COLS.get('general_notes','General notes'), '')))
+                year_lvl  = str(row[COLS['year']])
+                roll_raw  = str(row[COLS['rollgroup']])
+                roll      = expand_rollgroup(roll_raw)
+                raw_med   = str(row.get(COLS['medical_notes'], ""))
+                raw_emerg = str(row.get(COLS['emergency_notes'], ""))
+                parsed_med  = parse_medical_text(raw_med)
+                parsed_con  = parse_emergency_contacts(raw_emerg)
+                _pdf_rec = st.session_state.get('seqta_contact_matched', {}).get(sid)
+                if not _pdf_rec:
+                    for _mi, _msid in st.session_state.get('seqta_contact_manual', {}).items():
+                        if _msid == sid:
+                            for _u in st.session_state.get('seqta_contact_unmatched', []):
+                                if _u.get('_index') == _mi:
+                                    _pdf_rec = _u; break
+                            break
+                parsed_home = home_contacts_from_pdf(_pdf_rec) if _pdf_rec else parse_home_contacts(row)
+                sections = []
+                layout = CONFIG["default_profile_layout"]
+                for sec in layout:
+                    is_med = COLS['medical_notes'] in sec['fields']
+                    is_emg = COLS['emergency_notes'] in sec['fields']
+                    is_lrn = COLS['special_notes'] in sec['fields']
+                    if is_med:
+                        sections.append({"title": sec['section'], "type": "medical_cards", "content": parsed_med})
+                    elif is_emg:
+                        if parsed_home['contacts'] or parsed_home['home_address'] or parsed_home['home_phone']:
+                            sections.append({"title": "Home Contacts", "type": "home_contacts", "content": parsed_home})
+                        sections.append({"title": sec['section'], "type": "emergency_grid", "content": parsed_con})
+                        d_col = "Doctor notes" if "Doctor notes" in row else COLS.get('doctor_details')
+                        if d_col and d_col in row:
+                            sections.append({"title": "Medical Contacts", "type": "doctor_grid", "content": parse_doctors(str(row.get(d_col, "")))})
+                    elif is_lrn:
+                        sections.append({"title": sec['section'], "type": "learning_support", "content": parse_learning_support(str(row.get(COLS['special_notes'], "")))})
+                swim_ability   = final_swimming_map.get(sid, "Data not recorded")
+                swim_color     = get_swimming_display_color(swim_ability)
+                dietary_req    = final_dietary_map.get(sid, "No data given")
+                photo_perm_val = final_photo_perm_map.get(sid, 'No Response') if final_photo_perm_map else None
+                plan_map_local = {}
+                detected = st.session_state.get('detected_plans', {})
+                auto_files = st.session_state.get("auto_downloaded_plan_files", {})
+                manual_uploads = st.session_state.get("manual_plan_uploads", {})
+                if sid in detected:
+                    for plan_idx, _ in enumerate(detected[sid]):
+                        plan_key = f"{sid}_{plan_idx}"
+                        if plan_key in manual_uploads:
+                            raw_b, fn = manual_uploads[plan_key]
+                            if raw_b:
+                                buf = BytesIO(raw_b); buf.name = fn
+                                plan_map_local.setdefault(sid, []).append(buf)
+                        elif plan_key in auto_files:
+                            raw_b, fn = auto_files[plan_key]
+                            if raw_b:
+                                buf = BytesIO(raw_b); buf.name = fn
+                                plan_map_local.setdefault(sid, []).append(buf)
+                embedded = []
+                for f in plan_map_local.get(sid, []):
+                    embedded.extend(convert_file_to_images(f))
+                if sid in st.session_state.get('attachments', {}):
+                    for f in st.session_state.attachments[sid]:
+                        embedded.extend(convert_file_to_images(f))
+                med_l = raw_med.lower()
+                c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phones'][0]['display']})" if parsed_con else ""
+                return {
+                    "profile": {
+                        "id": sid, "link_id": link_id, "first": fname, "last": sname,
+                        "year": year_lvl, "roll": roll, "house": house, "dob": dob,
+                        "gender": gender, "tutor": tutor,
+                        "swimming": swim_ability, "swim_color": swim_color,
+                        "dietary": dietary_req, "photo_perm": photo_perm_val,
+                        "photo": img_to_base64(final_photo_map.get(sid)),
+                        "sections": sections, "attachments": embedded
+                    },
+                    "matrix": {
+                        "id": sid, "link_id": link_id, "name": f"{sname}, {fname}",
+                        "gender": gender, "contact": c_disp,
+                        "asthma": "asthma" in med_l,
+                        "allergy": "allergy" in med_l,
+                        "anaphylaxis": "anaphylaxis" in med_l,
+                        "swimming": swim_ability, "swim_color": swim_color
+                    },
+                    "medical": {"name": f"{fname} {sname}", "link_id": link_id, "conditions": parsed_med} if parsed_med else None,
+                }
+
+            def render_group_pdf(records, group_title):
+                s_list   = [r['profile'] for r in records]
+                m_list   = sorted([r['matrix'] for r in records], key=lambda x: x['name'])
+                med_list = [r['medical'] for r in records if r['medical']]
+                no_perm_list = [
+                    s for s in s_list if s.get('photo_perm') in ('No', 'No Response')
+                ] if display_opts.get('photo_perm') else []
+                full_html = tpl.render(
+                    title=group_title,
+                    date=datetime.now().strftime("%d %B %Y"),
+                    students=s_list, matrix=m_list, medical_full=med_list,
+                    no_perm_list=no_perm_list,
+                    options=display_opts, mode="full",
+                    student_count=len(s_list)
+                )
+                return HTML(string=full_html).write_pdf()
+
+            rows_list = list(df_full.iterrows())
+            cg_status = st.status("Generating group booklets…", expanded=True)
+
+            if cg_output_mode.startswith("Separate"):
+                zip_buf = BytesIO()
+                with zipfile.ZipFile(zip_buf, "w") as zf:
+                    for gi, grp in enumerate(st.session_state.custom_groups):
+                        cg_status.write(f"Building '{grp['label']}' ({gi+1}/{len(st.session_state.custom_groups)})…")
+                        indices = resolve_group(grp['identifiers'])
+                        if not indices:
+                            continue
+                        records = []
+                        for i in indices:
+                            _, row = rows_list[i]
+                            sid = str(row.get(id_col, '')).strip()
+                            records.append(build_profile_obj(row, sid))
+                        pdf_bytes = render_group_pdf(records, grp['label'])
+                        safe = re.sub(r'[^a-zA-Z0-9]', '_', grp['label'])
+                        zf.writestr(f"Medical_Booklet_{safe}.pdf", pdf_bytes)
+                cg_status.update(label="✅ All group booklets ready", state="complete", expanded=False)
+                st.download_button(
+                    "⬇ Download Group Booklets (ZIP)",
+                    data=zip_buf.getvalue(),
+                    file_name="Medical_Booklets_Groups.zip",
+                    mime="application/zip"
+                )
+            else:
+                # Combined PDF — one PDF with each group's pages concatenated
+                writer = PdfWriter()
+                for gi, grp in enumerate(st.session_state.custom_groups):
+                    cg_status.write(f"Building '{grp['label']}' ({gi+1}/{len(st.session_state.custom_groups)})…")
+                    indices = resolve_group(grp['identifiers'])
+                    if not indices:
+                        continue
+                    records = []
+                    for i in indices:
+                        _, row = rows_list[i]
+                        sid = str(row.get(id_col, '')).strip()
+                        records.append(build_profile_obj(row, sid))
+                    pdf_bytes = render_group_pdf(records, grp['label'])
+                    reader = PdfReader(BytesIO(pdf_bytes))
+                    for page in reader.pages:
+                        writer.add_page(page)
+                combined_buf = BytesIO()
+                writer.write(combined_buf)
+                cg_status.update(label="✅ Combined booklet ready", state="complete", expanded=False)
+                st.download_button(
+                    "⬇ Download Combined Booklet",
+                    data=combined_buf.getvalue(),
+                    file_name="Medical_Booklet_Combined_Groups.pdf",
+                    mime="application/pdf"
+                )
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
