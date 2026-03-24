@@ -793,6 +793,33 @@ def _build_parent_surname_lookup(contact_df):
     return lookup
 
 
+def _build_parent_lookup_from_pdf(seqta_matched):
+    """
+    Build parent surname lookup from Seqta PDF guardian data.
+    seqta_matched: { student_id: pdf_record } where each record has 'guardians'
+    list of { name: "Firstname Lastname", relationship, mobile... }
+    Returns: { surname_lower: [ {sid, first_lower}, ... ] }
+    """
+    lookup = {}
+    if not seqta_matched:
+        return lookup
+    for sid, rec in seqta_matched.items():
+        for guardian in rec.get('guardians', []):
+            full_name = guardian.get('name', '').strip()
+            if not full_name:
+                continue
+            parts = full_name.split()
+            if len(parts) < 2:
+                continue
+            surname = parts[-1].lower()
+            first   = parts[0].lower()
+            entry   = {'sid': sid, 'first': first}
+            lookup.setdefault(surname, [])
+            if entry not in lookup[surname]:
+                lookup[surname].append(entry)
+    return lookup
+
+
 def _read_and_dedup_csv(file_obj):
     """
     Reads a Paperly-format CSV (Email, First Name, Surname, Submission Time, Status, Value)
@@ -1151,12 +1178,27 @@ def match_photo_permissions(df_main, photo_perm_csv):
             return (re.search(first_pat, emerg_name_lower) is not None and
                     re.search(surname_pat, emerg_name_lower) is not None)
 
-        # ── Tier 2 prep: SC1/SC2 surname lookup from contact CSV ─────────────
-        contact_df    = st.session_state.get('contact_csv_df', None)
-        parent_lookup = _build_parent_surname_lookup(contact_df)   # surname -> {sid,...}
+        # ── Tier 2 prep: guardian lookup from Seqta PDF (incl. manual matches) ─
+        seqta_matched = st.session_state.get('seqta_contact_matched', {}).copy()
+        # Include manually matched students so their guardians are also checked
+        seqta_manual    = st.session_state.get('seqta_contact_manual', {})
+        seqta_unmatched = st.session_state.get('seqta_contact_unmatched', [])
+        for idx, msid in seqta_manual.items():
+            for rec in seqta_unmatched:
+                if rec.get('_index') == idx:
+                    seqta_matched[msid] = rec
+                    break
+        if seqta_matched:
+            parent_lookup = _build_parent_lookup_from_pdf(seqta_matched)
+            source_label  = "Seqta PDF guardians"
+        else:
+            # Fallback to old attendance CSV for backward compatibility
+            contact_df    = st.session_state.get('contact_csv_df', None)
+            parent_lookup = _build_parent_surname_lookup(contact_df)
+            source_label  = "Attendance CSV (SC1/SC2)"
         using_contact = bool(parent_lookup)
         print(f"Emergency contacts: always active (first + last name required)")
-        print(f"Contact CSV (SC1/SC2): {using_contact} ({len(parent_lookup)} surnames indexed)")
+        print(f"Parent lookup ({source_label}): {using_contact} ({len(parent_lookup)} surnames indexed)")
 
         # ── Tier 3 prep: student own-surname lookup ───────────────────────────
         student_surname_lookup = {}
