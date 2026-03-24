@@ -259,8 +259,9 @@
     <div class="page-break"></div>
     {% endif %}
 
-    {% if options.photo_perm and no_perm_list %}
+    {% if options.photo_perm %}
     <div style="page-break-inside: avoid;">
+    {% if no_perm_list %}
     <h3>Photo Permissions — No / No Response</h3>
     <p style="font-size:10pt; color:#555; margin-bottom:8px;">
         The following students have <strong>not given permission</strong> or have <strong>not responded</strong>.
@@ -285,6 +286,12 @@
         </div>
         {% endfor %}
     </div>
+    {% else %}
+    <h3>Photo Permissions</h3>
+    <p style="font-size:10pt; color:#2e7d32; font-weight:bold; margin-bottom:8px;">
+        ✅ All students have given photo permission.
+    </p>
+    {% endif %}
     </div>
     <div class="page-break"></div>
     {% endif %}
