@@ -230,6 +230,174 @@
     </div>
     <div class="page-break"></div>
 
+    {# ════════════════════════════════════════════════════════════════
+       Y8 CAMP LEADER SUMMARY PAGE
+       Rendered only when y8_camp_group is passed (Freycinet or Bay of Fires).
+       Sits between the photo index and the dietary / medical overview pages.
+    ════════════════════════════════════════════════════════════════ #}
+    {% if y8_camp_group %}
+    <style>
+        .camp-summary-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 8pt;
+            margin-top: 10px;
+            margin-bottom: 14px;
+        }
+        .camp-summary-table th {
+            background: #1a3a5c;
+            color: #ffffff;
+            border: 1px solid #0d2137;
+            padding: 5px 7px;
+            text-align: center;
+            font-size: 7.5pt;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .camp-summary-table th.name-col { text-align: left; }
+        .camp-summary-table td {
+            border: 1px solid #c8d0d8;
+            padding: 4px 6px;
+            text-align: center;
+            vertical-align: middle;
+        }
+        .camp-summary-table td.name-cell {
+            text-align: left;
+            font-weight: bold;
+            white-space: nowrap;
+        }
+        .score-1 { background-color: #b71c1c !important; color: #ffffff !important; font-weight: bold; }
+        .score-2 { background-color: #e65100 !important; color: #ffffff !important; font-weight: bold; }
+        .score-3 { background-color: #f9a825 !important; color: #333333 !important; font-weight: bold; }
+        .score-na { color: #aaaaaa; font-style: italic; }
+        .camp-preamble {
+            font-size: 8pt;
+            color: #555;
+            font-style: italic;
+            margin-bottom: 12px;
+            padding: 8px 12px;
+            background: #f5f5f5;
+            border-left: 4px solid #1a3a5c;
+            border-radius: 3px;
+            line-height: 1.5;
+        }
+        .camp-summary-heading {
+            font-size: 11pt;
+            font-weight: bold;
+            color: #1a3a5c;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+        .camp-badge {
+            display: inline-block;
+            font-size: 8.5pt;
+            font-weight: bold;
+            padding: 2px 9px;
+            border-radius: 3px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        .badge-freycinet { background: #1565c0; color: white; }
+        .badge-bof       { background: #2e7d32; color: white; }
+    </style>
+
+    {# ── Reusable macro: colour-code a single survey score cell ── #}
+    {%- macro score_cell(val) -%}
+        {%- set v = val | string | trim -%}
+        {%- set num = v | int(default=-1) -%}
+        {%- if num == 1 %}<td class="score-1">1</td>
+        {%- elif num == 2 %}<td class="score-2">2</td>
+        {%- elif num == 3 %}<td class="score-3">3</td>
+        {%- elif num == 4 or num == 5 %}<td>{{ num }}</td>
+        {%- elif v and v not in ('N/A', '---', 'nan', '') %}<td>{{ v }}</td>
+        {%- else %}<td class="score-na">–</td>
+        {%- endif %}
+    {%- endmacro -%}
+
+    <div class="camp-summary-heading">
+        Camp Leader Summary
+        {%- if y8_camp_group == 'Freycinet' %}
+            <span class="camp-badge badge-freycinet">FREYCINET</span>
+        {%- else %}
+            <span class="camp-badge badge-bof">BAY OF FIRES</span>
+        {%- endif %}
+    </div>
+
+    <div class="camp-preamble">
+        Please note: The following data is based on student self-assessment surveys and reflects their own gauge of their capabilities and comfort levels.
+    </div>
+
+    {% if y8_camp_group == 'Freycinet' %}
+    <table class="camp-summary-table">
+        <thead>
+            <tr>
+                <th class="name-col" width="22%">Name</th>
+                <th width="10%">Sea Kayak</th>
+                <th width="10%">Coasteer</th>
+                <th width="10%">Gen Camping</th>
+                <th width="10%">Swimming</th>
+                <th width="10%">Hardship</th>
+                <th width="10%">Independence</th>
+                <th width="10%">Teamwork</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in students %}
+            {% if s.y8_camp %}
+            <tr class="no-break">
+                <td class="name-cell">{{ s.first }} {{ s.last }}</td>
+                {{ score_cell(s.y8_camp['Sea Kayak (Freycinet)']) }}
+                {{ score_cell(s.y8_camp['Coasteer (Freycinet)']) }}
+                {{ score_cell(s.y8_camp['General Camping Skill']) }}
+                {{ score_cell(s.y8_camp['Swimming Confidence']) }}
+                {{ score_cell(s.y8_camp['Reaction to Hardship']) }}
+                {{ score_cell(s.y8_camp['Gear/Packing Independence']) }}
+                {{ score_cell(s.y8_camp['Group Teamwork/Inclusion']) }}
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    {# Bay of Fires — includes MTB and Snorkel columns #}
+    <table class="camp-summary-table">
+        <thead>
+            <tr>
+                <th class="name-col" width="19%">Name</th>
+                <th width="9%">MTB Ability</th>
+                <th width="9%">MTB Interest</th>
+                <th width="8%">Snorkel</th>
+                <th width="9%">Gen Camping</th>
+                <th width="9%">Swimming</th>
+                <th width="9%">Hardship</th>
+                <th width="9%">Independence</th>
+                <th width="9%">Teamwork</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in students %}
+            {% if s.y8_camp %}
+            <tr class="no-break">
+                <td class="name-cell">{{ s.first }} {{ s.last }}</td>
+                {{ score_cell(s.y8_camp['MTB Ability (BoF)']) }}
+                {{ score_cell(s.y8_camp['MTB Interest (BoF)']) }}
+                {{ score_cell(s.y8_camp['Snorkel (BoF)']) }}
+                {{ score_cell(s.y8_camp['General Camping Skill']) }}
+                {{ score_cell(s.y8_camp['Swimming Confidence']) }}
+                {{ score_cell(s.y8_camp['Reaction to Hardship']) }}
+                {{ score_cell(s.y8_camp['Gear/Packing Independence']) }}
+                {{ score_cell(s.y8_camp['Group Teamwork/Inclusion']) }}
+            </tr>
+            {% endif %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+    <div class="page-break"></div>
+    {% endif %}
+    {# ════════════════════════ END CAMP LEADER SUMMARY ════════════════════════ #}
+
     {% if options.dietary %}
     <h3>Dietary Requirements</h3>
     <table class="dietary-table">

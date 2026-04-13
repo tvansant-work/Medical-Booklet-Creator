@@ -65,6 +65,8 @@ if 'custom_groups' not in st.session_state:
     st.session_state.custom_groups = []  # list of {'label': str, 'identifiers': [str]}
 if 'custom_groups_ungrouped_checked' not in st.session_state:
     st.session_state.custom_groups_ungrouped_checked = False
+if 'y8_camp_data' not in st.session_state:
+    st.session_state.y8_camp_data = {}  # { student_id: { 'class': '8A', 'camp': 'Freycinet', ...survey cols... } }
 import pandas as pd
 import zipfile
 import yaml
@@ -1403,6 +1405,116 @@ def parse_learning_support(text):
         "accommodations": sorted(clean_badges)
     }
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Y8 CAMP EXCEL PARSER
+# ─────────────────────────────────────────────────────────────────────────────
+
+_Y8_SKIP_SHEETS = {"leader overview", "not attending", "updated leader overview"}
+
+_Y8_SURVEY_COLS = [
+    "Sea Kayak (Freycinet)",
+    "Coasteer (Freycinet)",
+    "MTB Ability (BoF)",
+    "MTB Interest (BoF)",
+    "Snorkel (BoF)",
+    "General Camping Skill",
+    "Swimming Confidence",
+    "Reaction to Hardship",
+    "Gear/Packing Independence",
+    "Group Teamwork/Inclusion",
+]
+
+def parse_y8_camp_excel(uploaded_file):
+    """
+    Parse Updated_Leader_Overview.xlsx exported from the Y8 Camp Group Maker.
+
+    Sheet structure (per class sheet e.g. "8A"):
+      - Rows are sorted: first block = Freycinet, then a separator row whose
+        Student / Student ID cell contains "BAY OF FIRES", then the BoF block.
+      - Columns include: Student ID, Student, and all _Y8_SURVEY_COLS.
+
+    Returns dict keyed by normalised Student ID string:
+        {
+          "12345": {
+            "class": "8A",
+            "camp":  "Freycinet",          # or "Bay of Fires"
+            "Sea Kayak (Freycinet)": "4",
+            ...all other survey cols...
+          }
+        }
+    """
+    result = {}
+    try:
+        xl = pd.ExcelFile(uploaded_file)
+    except Exception as e:
+        raise ValueError(f"Could not open Excel file: {e}")
+
+    for sheet in xl.sheet_names:
+        if sheet.strip().lower() in _Y8_SKIP_SHEETS:
+            continue
+
+        try:
+            df = xl.parse(sheet, dtype=str).fillna("")
+        except Exception:
+            continue
+
+        # Locate the Student ID column
+        id_col = None
+        for c in df.columns:
+            if str(c).strip().lower() == "student id":
+                id_col = c
+                break
+        # Fallback: any column whose header contains "student id"
+        if id_col is None:
+            for c in df.columns:
+                if "student id" in str(c).strip().lower():
+                    id_col = c
+                    break
+        # Last resort: column named "Student"
+        if id_col is None:
+            for c in df.columns:
+                if str(c).strip().lower() == "student":
+                    id_col = c
+                    break
+        if id_col is None:
+            continue
+
+        # Build a case-insensitive column lookup for the survey cols
+        col_lookup = {}   # canonical_name_lower -> actual_df_col_name
+        for c in df.columns:
+            col_lookup[str(c).strip().lower()] = c
+
+        current_camp = "Freycinet"
+
+        for _, row in df.iterrows():
+            raw_id = str(row.get(id_col, "")).strip()
+            upper_id = raw_id.upper()
+
+            # Detect the BAY OF FIRES divider row — it appears in the Student ID
+            # or Student column as a separator like "--- BAY OF FIRES ---"
+            if "BAY OF FIRES" in upper_id:
+                current_camp = "Bay of Fires"
+                continue
+
+            # Skip blank / separator / header rows
+            if not raw_id or raw_id.startswith("---") or raw_id.lower() in ("nan", "n/a", "student id", "student"):
+                continue
+
+            # Normalise ID (strip trailing .0 from numeric IDs)
+            sid = re.sub(r'\.0$', '', raw_id).strip()
+            if not sid:
+                continue
+
+            record = {"class": sheet.strip(), "camp": current_camp}
+            for col_name in _Y8_SURVEY_COLS:
+                actual = col_lookup.get(col_name.lower())
+                record[col_name] = str(row.get(actual, "N/A")).strip() if actual else "N/A"
+
+            result[sid] = record
+
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Ligature / unknown-glyph map.
 # The FB-block entries are standard Unicode ligatures.
@@ -2315,6 +2427,50 @@ if t1 is not None:
         """, unsafe_allow_html=True)
         photo_perm_csv = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed")
 
+    # ── Y8 Camp Data (optional) ────────────────────────────────────────────────
+    st.markdown('<div class="section-head">Optional — Y8 Camp Data</div>', unsafe_allow_html=True)
+    st.markdown("""
+    <div class="upload-card optional">
+      <div class="upload-card-label">🏕️ Y8 Camp Data (Updated_Leader_Overview.xlsx)</div>
+      <div class="upload-card-desc">
+        Export from the Y8 Camp Group Maker. When uploaded, enables the
+        <strong>Y8 Preloaded Camp Groups</strong> sort option — auto-groups students
+        by class and camp, and injects a Leader Survey Summary page into each booklet.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
+    y8_camp_file = st.file_uploader(
+        "Y8 Camp Data Excel",
+        type=["xlsx"],
+        label_visibility="collapsed",
+        key="y8_camp_uploader"
+    )
+
+    if y8_camp_file is not None:
+        _y8_file_id = getattr(y8_camp_file, "file_id", y8_camp_file.name)
+        if st.session_state.get("_y8_camp_file_id") != _y8_file_id:
+            try:
+                with st.spinner("Parsing Y8 camp data…"):
+                    _y8_parsed = parse_y8_camp_excel(y8_camp_file)
+                st.session_state.y8_camp_data    = _y8_parsed
+                st.session_state._y8_camp_file_id = _y8_file_id
+                st.success(f"✅ Y8 camp data loaded — {len(_y8_parsed)} students across "
+                           f"{len(set(v['class'] for v in _y8_parsed.values()))} classes")
+            except Exception as _e:
+                st.error(f"Could not parse Y8 camp file: {_e}")
+                st.session_state.y8_camp_data = {}
+    else:
+        # Clear stale data when file is removed
+        if st.session_state.get("_y8_camp_file_id"):
+            st.session_state.y8_camp_data     = {}
+            st.session_state._y8_camp_file_id = None
+
+    if st.session_state.y8_camp_data:
+        _y8 = st.session_state.y8_camp_data
+        _classes = sorted(set(v['class'] for v in _y8.values()))
+        _camps   = sorted(set(v['camp']  for v in _y8.values()))
+        st.caption(f"🏕️ Loaded: classes {', '.join(_classes)}  ·  camps: {', '.join(_camps)}")
+
     # ── File processing ────────────────────────────────────────────────────────
     if csv:
         df_temp = pd.read_csv(csv).fillna("")
@@ -2790,15 +2946,23 @@ if t2 is not None:
 
             col3, col4 = st.columns(2)
             with col3:
-                sort_by = st.selectbox("Sort students by:", [
+                _sort_options = [
                     "Alphabetical (Surname)", "Roll Group", "House", "Year Level", "Custom Groups"
-                ])
+                ]
+                if st.session_state.get("y8_camp_data"):
+                    _sort_options.append("🏕️ Y8 Preloaded Camp Groups")
+                sort_by = st.selectbox("Sort students by:", _sort_options)
             with col4:
                 if sort_by == "Alphabetical (Surname)":
                     output_mode = "Single Document"
                     st.caption("Alphabetical sorting produces a single combined document.")
                 elif sort_by == "Custom Groups":
                     output_mode = st.radio("Output:", ["Separate PDF per group (ZIP)", "Single combined PDF with dividers"])
+                elif sort_by == "🏕️ Y8 Preloaded Camp Groups":
+                    output_mode = st.radio(
+                        "Output:",
+                        ["12 Separate PDFs (One for each Class/Camp)", "1 Master PDF"]
+                    )
                 else:
                     output_mode = st.radio("Output:", ["Single Document", f"Split by {sort_by}"])
 
@@ -3170,7 +3334,9 @@ if t2 is not None:
                         "dietary": dietary_req,
                         "photo_perm": photo_perm_val,
                         "photo": img_to_base64(final_photo_map.get(sid)),
-                        "sections": sections, "attachments": embedded
+                        "sections": sections, "attachments": embedded,
+                        # Y8 camp survey data — None when not a camp booklet
+                        "y8_camp": st.session_state.get("y8_camp_data", {}).get(sid, None)
                     }
                     matrix_obj = {
                         "id": sid, "link_id": link_id, "name": f"{sname}, {fname}",
@@ -3191,7 +3357,7 @@ if t2 is not None:
                 # ── Sort & group ──────────────────────────────────────────────
                 status.write("Sorting & grouping…")
 
-                def render_subset(records, title_suffix=""):
+                def render_subset(records, title_suffix="", y8_camp_group=None):
                     s_list   = [r['profile'] for r in records]
                     m_list   = [r['matrix']  for r in records]
                     med_list = [r['medical'] for r in records if r['medical']]
@@ -3206,7 +3372,8 @@ if t2 is not None:
                         students=s_list, matrix=m_list, medical_full=med_list,
                         no_perm_list=no_perm_list,
                         options=display_opts, mode="full",
-                        student_count=len(s_list)
+                        student_count=len(s_list),
+                        y8_camp_group=y8_camp_group
                     )
                     return HTML(string=full_html).write_pdf()
 
@@ -3276,6 +3443,56 @@ if t2 is not None:
                         st.download_button("⬇ Download Combined Booklet", data=combined_buf.getvalue(),
                                            file_name="Medical_Booklet_Combined_Groups.pdf", mime="application/pdf")
 
+                elif sort_by == "🏕️ Y8 Preloaded Camp Groups":
+                    # Build groups keyed by "{Class} - {Camp}" e.g. "8A - Freycinet"
+                    y8_groups = {}
+                    for rec in all_records:
+                        y8 = rec['profile'].get('y8_camp')
+                        if y8:
+                            gk = f"{y8['class']} - {y8['camp']}"
+                            y8_groups.setdefault(gk, []).append(rec)
+
+                    if not y8_groups:
+                        status.update(label="⚠️ No students matched Y8 camp data", state="error", expanded=False)
+                        st.warning(
+                            "No students could be matched to the Y8 camp data. "
+                            "Check that Student IDs in the Student List CSV match those in the camp Excel file."
+                        )
+                    elif "12 Separate" in output_mode:
+                        _prog_placeholder.empty()
+                        status.write("Generating separate camp PDFs…")
+                        zip_buffer = BytesIO()
+                        with zipfile.ZipFile(zip_buffer, "w") as zf:
+                            for g_name in sorted(y8_groups.keys()):
+                                g_recs = y8_groups[g_name]
+                                _camp = g_recs[0]['profile']['y8_camp']['camp']
+                                pdf_data = render_subset(g_recs, title_suffix=f"— {g_name}", y8_camp_group=_camp)
+                                safe_name = re.sub(r'[^a-zA-Z0-9]', '_', g_name)
+                                zf.writestr(f"Medical_Booklet_{safe_name}.pdf", pdf_data)
+                        status.update(label="✅ All camp booklets ready", state="complete", expanded=False)
+                        st.download_button(
+                            "⬇ Download Camp Booklets (ZIP)", data=zip_buffer.getvalue(),
+                            file_name="Y8_Camp_Medical_Booklets.zip", mime="application/zip"
+                        )
+                    else:
+                        _prog_placeholder.empty()
+                        status.write("Generating master camp PDF…")
+                        writer = PdfWriter()
+                        for g_name in sorted(y8_groups.keys()):
+                            g_recs = y8_groups[g_name]
+                            _camp = g_recs[0]['profile']['y8_camp']['camp']
+                            pdf_data = render_subset(g_recs, title_suffix=f"— {g_name}", y8_camp_group=_camp)
+                            reader = PdfReader(BytesIO(pdf_data))
+                            for page in reader.pages:
+                                writer.add_page(page)
+                        combined_buf = BytesIO()
+                        writer.write(combined_buf)
+                        status.update(label="✅ Master camp booklet ready", state="complete", expanded=False)
+                        st.download_button(
+                            "⬇ Download Master Camp Booklet", data=combined_buf.getvalue(),
+                            file_name="Y8_Camp_Medical_Booklet_Master.pdf", mime="application/pdf"
+                        )
+
                 elif sort_by == "Roll Group":
                     all_records.sort(key=lambda x: (str(x['sort_keys']['roll']), x['sort_keys']['alpha']))
                     group_key = 'roll'
@@ -3289,7 +3506,7 @@ if t2 is not None:
                     all_records.sort(key=lambda x: x['sort_keys']['alpha'])
                     group_key = 'alpha'
 
-                if sort_by != "Custom Groups":
+                if sort_by not in ("Custom Groups", "🏕️ Y8 Preloaded Camp Groups"):
                     if "Split" in output_mode:
                         _prog_placeholder.empty()
                         status.write("Generating split PDFs…")
