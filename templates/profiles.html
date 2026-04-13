@@ -295,10 +295,10 @@
         /* Alternating row shading */
         .camp-summary-table tbody tr:nth-child(even) td { background-color: #f7f9fc; }
         .camp-summary-table tbody tr:nth-child(odd)  td { background-color: #ffffff; }
-        /* Score colours */
-        .score-1 { background-color: #b71c1c !important; color: #ffffff !important; font-weight: bold; }
-        .score-2 { background-color: #e65100 !important; color: #ffffff !important; font-weight: bold; }
-        .score-3 { background-color: #f9a825 !important; color: #333333 !important; font-weight: bold; }
+        /* Score colours — 1–10 scale */
+        .score-low     { background-color: #b71c1c !important; color: #ffffff !important; font-weight: bold; } /* 1–2 */
+        .score-mid     { background-color: #e65100 !important; color: #ffffff !important; font-weight: bold; } /* 3–4 */
+        .score-caution { background-color: #f9a825 !important; color: #333333 !important; font-weight: bold; } /* 5–6 */
         .score-na { color: #bbbbbb; font-style: italic; font-size: 7pt; }
         /* Column-group divider line */
         .camp-summary-table td.col-divider,
@@ -341,12 +341,13 @@
             font-size: 7pt;
             margin-bottom: 8px;
             align-items: center;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
         }
         .score-legend-item {
             display: flex;
             align-items: center;
             gap: 4px;
+            white-space: nowrap;
         }
         .legend-swatch {
             width: 14px;
@@ -355,20 +356,20 @@
             display: inline-block;
             flex-shrink: 0;
         }
-        .swatch-1 { background-color: #b71c1c; }
-        .swatch-2 { background-color: #e65100; }
-        .swatch-3 { background-color: #f9a825; }
-        .swatch-45 { background-color: #d0e8d0; border: 1px solid #999; }
+        .swatch-low     { background-color: #b71c1c; }
+        .swatch-mid     { background-color: #e65100; }
+        .swatch-caution { background-color: #f9a825; }
+        .swatch-high    { background-color: #d0e8d0; border: 1px solid #999; }
     </style>
 
     {# ── Reusable macro: colour-code a single survey score cell ── #}
     {%- macro score_cell(val, extra_class='') -%}
         {%- set v = val | string | trim -%}
         {%- set num = v | int(default=-1) -%}
-        {%- if num == 1 %}<td class="score-1 {{ extra_class }}">1</td>
-        {%- elif num == 2 %}<td class="score-2 {{ extra_class }}">2</td>
-        {%- elif num == 3 %}<td class="score-3 {{ extra_class }}">3</td>
-        {%- elif num == 4 or num == 5 %}<td class="{{ extra_class }}">{{ num }}</td>
+        {%- if num >= 1 and num <= 2 %}<td class="score-low {{ extra_class }}">{{ num }}</td>
+        {%- elif num >= 3 and num <= 4 %}<td class="score-mid {{ extra_class }}">{{ num }}</td>
+        {%- elif num >= 5 and num <= 6 %}<td class="score-caution {{ extra_class }}">{{ num }}</td>
+        {%- elif num >= 7 and num <= 10 %}<td class="{{ extra_class }}">{{ num }}</td>
         {%- elif v and v not in ('N/A', '---', 'nan', '') %}<td class="{{ extra_class }}">{{ v }}</td>
         {%- else %}<td class="score-na {{ extra_class }}">–</td>
         {%- endif %}
@@ -384,15 +385,15 @@
     </div>
 
     <div class="score-legend">
-        <strong style="font-size:7pt;">Score key (1–5):</strong>
-        <span class="score-legend-item"><span class="legend-swatch swatch-1"></span>1 — Very low / strong concern</span>
-        <span class="score-legend-item"><span class="legend-swatch swatch-2"></span>2 — Low / some concern</span>
-        <span class="score-legend-item"><span class="legend-swatch swatch-3"></span>3 — Moderate</span>
-        <span class="score-legend-item"><span class="legend-swatch swatch-45"></span>4–5 — Confident / enthusiastic</span>
+        <strong style="font-size:7pt; white-space:nowrap;">Score key (1–10):</strong>
+        <span class="score-legend-item"><span class="legend-swatch swatch-low"></span>1–2 — Very low / strong concern</span>
+        <span class="score-legend-item"><span class="legend-swatch swatch-mid"></span>3–4 — Low / some concern</span>
+        <span class="score-legend-item"><span class="legend-swatch swatch-caution"></span>5–6 — Moderate</span>
+        <span class="score-legend-item"><span class="legend-swatch swatch-high"></span>7–10 — Confident / enthusiastic</span>
     </div>
 
     <div class="camp-preamble">
-        All scores are student self-assessments from the pre-camp survey. Scores of 1 or 2 are highlighted as potential areas needing extra leader attention. Columns are grouped: <em>camp activities</em> (left) then <em>general readiness</em> (right, separated by a darker border).
+        All scores are student self-assessments from the pre-camp survey (scale 1–10). Scores of 1–2 are highlighted as potential areas needing extra leader attention; 3–4 indicate some concern. Columns are grouped: <em>camp activities</em> (left) then <em>general readiness</em> (right, separated by a darker border).
     </div>
 
     {% if y8_camp_group == 'Freycinet' %}
