@@ -60,13 +60,15 @@ if [ -z "$PYTHON" ] || ! $PYTHON -c "import streamlit" &>/dev/null 2>&1; then
     exit 1
 fi
 
-# ── Verify / Update Dependencies ──────────────────────────────────
-# Silently installs any new packages added to requirements.txt
-echo "  📦  Checking dependencies..."
+# ── Auto-Install Missing Packages ─────────────────────────────────
+# This ensures existing users get new packages (like openpyxl) 
+# automatically after the GitHub pull, without needing setup.sh
+echo ""
+echo "  📦  Verifying required packages..."
 if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-    conda run -n "$ENV_NAME" pip install -r requirements.txt -q 2>/dev/null
+    conda run -n "$ENV_NAME" pip install -r requirements.txt --quiet
 else
-    $PYTHON -m pip install -r requirements.txt -q 2>/dev/null
+    $PYTHON -m pip install -r requirements.txt --quiet
 fi
 
 # ── Bypass Streamlit Welcome Prompt ───────────────────────────────
