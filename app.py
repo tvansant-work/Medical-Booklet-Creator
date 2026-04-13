@@ -1444,8 +1444,13 @@ def parse_y8_camp_excel(uploaded_file):
         }
     """
     result = {}
+    # Read the entire file into BytesIO first — Streamlit UploadedFile objects
+    # are not always re-seekable, and pandas needs a proper seekable buffer.
+    # Specify engine='openpyxl' explicitly to avoid the missing-dependency error.
     try:
-        xl = pd.ExcelFile(uploaded_file)
+        uploaded_file.seek(0)
+        file_bytes = BytesIO(uploaded_file.read())
+        xl = pd.ExcelFile(file_bytes, engine='openpyxl')
     except Exception as e:
         raise ValueError(f"Could not open Excel file: {e}")
 
@@ -2459,11 +2464,15 @@ if t1 is not None:
             except Exception as _e:
                 st.error(f"Could not parse Y8 camp file: {_e}")
                 st.session_state.y8_camp_data = {}
-    else:
-        # Clear stale data when file is removed
-        if st.session_state.get("_y8_camp_file_id"):
-            st.session_state.y8_camp_data     = {}
-            st.session_state._y8_camp_file_id = None
+        else:
+            # File unchanged — show the persistent loaded confirmation
+            _y8 = st.session_state.y8_camp_data
+            if _y8:
+                st.success(f"✅ Y8 camp data loaded — {len(_y8)} students across "
+                           f"{len(set(v['class'] for v in _y8.values()))} classes")
+    # NOTE: No else-clear here. Switching to another tab causes y8_camp_file to be
+    # None (the Setup tab isn't rendered), but the data in session_state must persist
+    # so the Y8 option remains visible in Step 5. Data is only cleared via Start Over.
 
     if st.session_state.y8_camp_data:
         _y8 = st.session_state.y8_camp_data
