@@ -1415,16 +1415,20 @@ _Y8_SKIP_SHEETS = {"not attending"}
 _Y8_LEADER_OVERVIEW_SHEETS = {"leader overview", "updated leader overview"}
 
 _Y8_SURVEY_COLS = [
-    "Sea Kayak (Freycinet)",
-    "Coasteer (Freycinet)",
-    "MTB Ability (BoF)",
-    "MTB Interest (BoF)",
-    "Snorkel (BoF)",
+    # Activity columns — camp-specific
+    "Sea Kayak",
+    "Coasteer",
+    "MTB Interest",
+    "Snorkel",
+    # General / shared columns
     "General Camping Skill",
+    "Sleeping Outdoors/Bugs",
     "Swimming Confidence",
+    "Bike Comfort",
+    "Overnight Hike",
     "Reaction to Hardship",
-    "Gear/Packing Independence",
-    "Group Teamwork/Inclusion",
+    "Gear Independence",
+    "Group Teamwork",
 ]
 
 def parse_y8_camp_excel(uploaded_file):
