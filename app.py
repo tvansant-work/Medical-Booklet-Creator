@@ -1409,7 +1409,10 @@ def parse_learning_support(text):
 # Y8 CAMP EXCEL PARSER
 # ─────────────────────────────────────────────────────────────────────────────
 
-_Y8_SKIP_SHEETS = {"leader overview", "not attending", "updated leader overview"}
+_Y8_SKIP_SHEETS = {"not attending"}
+
+# Sheets that contain the full leader overview data (case-insensitive match)
+_Y8_LEADER_OVERVIEW_SHEETS = {"leader overview", "updated leader overview"}
 
 _Y8_SURVEY_COLS = [
     "Sea Kayak (Freycinet)",
@@ -1427,13 +1430,19 @@ _Y8_SURVEY_COLS = [
 def parse_y8_camp_excel(uploaded_file):
     """
     Parse Updated_Leader_Overview.xlsx exported from the Y8 Camp Group Maker.
-    Mirrors the exact pd.ExcelFile / pd.read_excel pattern used in the Camp Groups app.
+
+    The file exported by the Final Roster & Leader Builder page has a single
+    sheet called "Updated Leader Overview" (sometimes "Leader Overview").
+    Each real student row has:
+        Student ID  |  Student  |  Class  |  Assigned Camp  |  <survey cols>
+
+    Separator rows have '---' in the Student ID or Student columns and are
+    skipped.  The 'Assigned Camp' column ('Freycinet' / 'Bay of Fires') is
+    used directly — no need to track a running camp variable.
 
     Returns dict keyed by normalised Student ID string:
-        { "12345": { "class": "8A", "camp": "Freycinet", <survey cols> } }
+        { "12345": { "class": "Bracey", "camp": "Freycinet", <survey cols> } }
     """
-    # Lazy import mirrors the Camp Groups app — openpyxl must be importable for
-    # pd.ExcelFile to open .xlsx files. Give a clear message if it's missing.
     try:
         from openpyxl import Workbook  # noqa: F401 — registers openpyxl with pandas
     except ImportError:
@@ -1449,14 +1458,57 @@ def parse_y8_camp_excel(uploaded_file):
 
     result = {}
 
+    # ── Strategy 1: Read the Leader Overview sheet directly ──────────────────
+    # The Updated_Leader_Overview.xlsx from the "Final Roster & Leader Builder"
+    # page has an "Updated Leader Overview" (or "Leader Overview") sheet with
+    # an explicit "Assigned Camp" column and a "Class" column.
+    leader_sheet = None
+    for sname in sheet_names:
+        if sname.strip().lower() in _Y8_LEADER_OVERVIEW_SHEETS:
+            leader_sheet = sname
+            break
+
+    if leader_sheet:
+        df_lo = pd.read_excel(xls, sheet_name=leader_sheet, dtype=str).fillna("")
+
+        if 'Student ID' in df_lo.columns and 'Assigned Camp' in df_lo.columns:
+            for _, row in df_lo.iterrows():
+                st_id    = str(row.get('Student ID', '')).replace('.0', '').strip()
+                stud_val = str(row.get('Student', '')).strip()
+                camp_val = str(row.get('Assigned Camp', '')).strip()
+                class_val = str(row.get('Class', '')).strip()
+
+                # Skip separator / header rows
+                if not st_id or st_id.lower() in ('nan', 'n/a', '---', 'student id', ''):
+                    continue
+                if st_id.startswith('---') or stud_val.startswith('---'):
+                    continue
+                # Skip rows without a real camp value
+                if camp_val.startswith('---') or camp_val.lower() in ('nan', ''):
+                    continue
+
+                record = {"class": class_val, "camp": camp_val}
+                for col_name in _Y8_SURVEY_COLS:
+                    val = str(row.get(col_name, 'N/A')).strip()
+                    # Treat '---' or blank as N/A
+                    record[col_name] = val if val not in ('---', '', 'nan') else 'N/A'
+
+                result[st_id] = record
+
+            if result:
+                return result
+
+    # ── Strategy 2: Fallback — read class-named tabs ─────────────────────────
+    # Supports the intermediate Camp_Allocations_Final.xlsx which has one tab
+    # per class (Bracey, Knight, etc.) with a BAY OF FIRES separator row.
     for sheet in sheet_names:
         if sheet.strip().lower() in _Y8_SKIP_SHEETS:
             continue
+        if sheet.strip().lower() in _Y8_LEADER_OVERVIEW_SHEETS:
+            continue
 
-        df_class = pd.read_excel(xls, sheet_name=sheet, dtype=str)
-        df_class = df_class.fillna("")
+        df_class = pd.read_excel(xls, sheet_name=sheet, dtype=str).fillna("")
 
-        # Must have a Student ID column
         if 'Student ID' not in df_class.columns:
             continue
 
@@ -1466,7 +1518,7 @@ def parse_y8_camp_excel(uploaded_file):
             stud_val = str(row.get('Student', '')).strip()
             st_id    = str(row.get('Student ID', '')).replace('.0', '').strip()
 
-            # BAY OF FIRES separator row — same check as Camp Groups app
+            # BAY OF FIRES separator row
             if 'BAY OF FIRES' in stud_val.upper() or 'BAY OF FIRES' in st_id.upper():
                 current_camp = "Bay of Fires"
                 continue
