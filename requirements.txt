@@ -8,3 +8,4 @@ weasyprint
 pypdf
 watchdog
 requests
+openpyxl
