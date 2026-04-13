@@ -368,8 +368,8 @@
         {%- set num = v | int(default=-1) -%}
         {%- if num >= 1 and num <= 2 %}<td class="score-low {{ extra_class }}">{{ num }}</td>
         {%- elif num >= 3 and num <= 4 %}<td class="score-mid {{ extra_class }}">{{ num }}</td>
-        {%- elif num >= 5 and num <= 6 %}<td class="score-caution {{ extra_class }}">{{ num }}</td>
-        {%- elif num >= 7 and num <= 10 %}<td class="{{ extra_class }}">{{ num }}</td>
+        {%- elif num == 5 %}<td class="score-caution {{ extra_class }}">{{ num }}</td>
+        {%- elif num >= 6 and num <= 10 %}<td class="{{ extra_class }}">{{ num }}</td>
         {%- elif v and v not in ('N/A', '---', 'nan', '') %}<td class="{{ extra_class }}">{{ v }}</td>
         {%- else %}<td class="score-na {{ extra_class }}">–</td>
         {%- endif %}
@@ -388,12 +388,12 @@
         <strong style="font-size:7pt; white-space:nowrap;">Score key (1–10):</strong>
         <span class="score-legend-item"><span class="legend-swatch swatch-low"></span>1–2 — Very low / strong concern</span>
         <span class="score-legend-item"><span class="legend-swatch swatch-mid"></span>3–4 — Low / some concern</span>
-        <span class="score-legend-item"><span class="legend-swatch swatch-caution"></span>5–6 — Moderate</span>
-        <span class="score-legend-item"><span class="legend-swatch swatch-high"></span>7–10 — Confident / enthusiastic</span>
+        <span class="score-legend-item"><span class="legend-swatch swatch-caution"></span>5 — Moderate</span>
+        <span class="score-legend-item"><span class="legend-swatch swatch-high"></span>6–10 — Confident / enthusiastic</span>
     </div>
 
     <div class="camp-preamble">
-        All scores are student self-assessments from the pre-camp survey (scale 1–10). Scores of 1–2 are highlighted as potential areas needing extra leader attention; 3–4 indicate some concern. Columns are grouped: <em>camp activities</em> (left) then <em>general readiness</em> (right, separated by a darker border).
+        All scores are student self-assessments from the pre-camp survey (scale 1–10). Scores of 1–2 are highlighted as potential areas needing extra leader attention; 3–4 indicate some concern; 5 is moderate. Columns are grouped: <em>camp activities</em> (left) then <em>general readiness</em> (right, separated by a darker border).
     </div>
 
     {% if y8_camp_group == 'Freycinet' %}
@@ -432,10 +432,6 @@
                     <span class="th-short">Overnighter</span>
                     <span class="th-full">Excitement: overnight hike</span>
                 </th>
-                <th style="width:7%;">
-                    <span class="th-short">Biking</span>
-                    <span class="th-full">Bike riding comfort/ability</span>
-                </th>
                 <th style="width:8%;">
                     <span class="th-short">Hardship</span>
                     <span class="th-full">Response when activity gets tough</span>
@@ -461,7 +457,6 @@
                 {{ score_cell(s.y8_camp['Sleeping Outdoors/Bugs']) }}
                 {{ score_cell(s.y8_camp['Swimming Confidence']) }}
                 {{ score_cell(s.y8_camp['Overnight Hike']) }}
-                {{ score_cell(s.y8_camp['Bike Comfort']) }}
                 {{ score_cell(s.y8_camp['Reaction to Hardship']) }}
                 {{ score_cell(s.y8_camp['Gear Independence']) }}
                 {{ score_cell(s.y8_camp['Group Teamwork']) }}
