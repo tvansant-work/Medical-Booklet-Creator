@@ -76,6 +76,7 @@ import base64
 import pdfplumber
 import unicodedata
 import requests
+import openpyxl
 from io import BytesIO
 from PIL import Image
 from datetime import datetime
@@ -1427,96 +1428,99 @@ _Y8_SURVEY_COLS = [
 def parse_y8_camp_excel(uploaded_file):
     """
     Parse Updated_Leader_Overview.xlsx exported from the Y8 Camp Group Maker.
+    Uses openpyxl directly — no pandas ExcelFile dependency issues.
 
     Sheet structure (per class sheet e.g. "8A"):
-      - Rows are sorted: first block = Freycinet, then a separator row whose
-        Student / Student ID cell contains "BAY OF FIRES", then the BoF block.
+      - Rows: first block = Freycinet, then a separator row whose Student ID
+        cell contains "BAY OF FIRES", then the Bay of Fires block.
       - Columns include: Student ID, Student, and all _Y8_SURVEY_COLS.
 
     Returns dict keyed by normalised Student ID string:
-        {
-          "12345": {
-            "class": "8A",
-            "camp":  "Freycinet",          # or "Bay of Fires"
-            "Sea Kayak (Freycinet)": "4",
-            ...all other survey cols...
-          }
-        }
+        { "12345": { "class": "8A", "camp": "Freycinet", <survey cols> } }
     """
-    result = {}
-    # Read the entire file into BytesIO first — Streamlit UploadedFile objects
-    # are not always re-seekable, and pandas needs a proper seekable buffer.
-    # Specify engine='openpyxl' explicitly to avoid the missing-dependency error.
+    # Read into BytesIO so openpyxl gets a clean seekable buffer
+    uploaded_file.seek(0)
+    file_bytes = BytesIO(uploaded_file.read())
+
     try:
-        uploaded_file.seek(0)
-        file_bytes = BytesIO(uploaded_file.read())
-        xl = pd.ExcelFile(file_bytes, engine='openpyxl')
+        wb = openpyxl.load_workbook(file_bytes, read_only=True, data_only=True)
     except Exception as e:
         raise ValueError(f"Could not open Excel file: {e}")
 
-    for sheet in xl.sheet_names:
-        if sheet.strip().lower() in _Y8_SKIP_SHEETS:
+    result = {}
+
+    for sheet_name in wb.sheetnames:
+        if sheet_name.strip().lower() in _Y8_SKIP_SHEETS:
             continue
 
-        try:
-            df = xl.parse(sheet, dtype=str).fillna("")
-        except Exception:
+        ws = wb[sheet_name]
+
+        # Read all rows into a list of lists (cell values as strings)
+        rows = []
+        for row in ws.iter_rows(values_only=True):
+            rows.append([str(v).strip() if v is not None else "" for v in row])
+
+        if len(rows) < 2:
             continue
 
-        # Locate the Student ID column
-        id_col = None
-        for c in df.columns:
-            if str(c).strip().lower() == "student id":
-                id_col = c
+        # First row is the header
+        headers = [h.strip() for h in rows[0]]
+
+        # Locate Student ID column index
+        id_idx = None
+        for i, h in enumerate(headers):
+            if h.lower() == "student id":
+                id_idx = i
                 break
-        # Fallback: any column whose header contains "student id"
-        if id_col is None:
-            for c in df.columns:
-                if "student id" in str(c).strip().lower():
-                    id_col = c
+        if id_idx is None:
+            for i, h in enumerate(headers):
+                if "student id" in h.lower():
+                    id_idx = i
                     break
-        # Last resort: column named "Student"
-        if id_col is None:
-            for c in df.columns:
-                if str(c).strip().lower() == "student":
-                    id_col = c
+        if id_idx is None:
+            for i, h in enumerate(headers):
+                if h.lower() == "student":
+                    id_idx = i
                     break
-        if id_col is None:
+        if id_idx is None:
             continue
 
-        # Build a case-insensitive column lookup for the survey cols
-        col_lookup = {}   # canonical_name_lower -> actual_df_col_name
-        for c in df.columns:
-            col_lookup[str(c).strip().lower()] = c
+        # Build header → column index lookup (case-insensitive)
+        col_idx = {h.lower(): i for i, h in enumerate(headers)}
 
         current_camp = "Freycinet"
 
-        for _, row in df.iterrows():
-            raw_id = str(row.get(id_col, "")).strip()
+        for row in rows[1:]:
+            if not row or id_idx >= len(row):
+                continue
+
+            raw_id = row[id_idx]
             upper_id = raw_id.upper()
 
-            # Detect the BAY OF FIRES divider row — it appears in the Student ID
-            # or Student column as a separator like "--- BAY OF FIRES ---"
+            # BAY OF FIRES separator row
             if "BAY OF FIRES" in upper_id:
                 current_camp = "Bay of Fires"
                 continue
 
-            # Skip blank / separator / header rows
-            if not raw_id or raw_id.startswith("---") or raw_id.lower() in ("nan", "n/a", "student id", "student"):
+            # Skip blanks / separators / header echoes
+            if (not raw_id
+                    or raw_id.startswith("---")
+                    or raw_id.lower() in ("nan", "n/a", "student id", "student", "")):
                 continue
 
-            # Normalise ID (strip trailing .0 from numeric IDs)
+            # Normalise ID — strip trailing .0 from numeric values
             sid = re.sub(r'\.0$', '', raw_id).strip()
             if not sid:
                 continue
 
-            record = {"class": sheet.strip(), "camp": current_camp}
+            record = {"class": sheet_name.strip(), "camp": current_camp}
             for col_name in _Y8_SURVEY_COLS:
-                actual = col_lookup.get(col_name.lower())
-                record[col_name] = str(row.get(actual, "N/A")).strip() if actual else "N/A"
+                ci = col_idx.get(col_name.lower())
+                record[col_name] = row[ci] if (ci is not None and ci < len(row)) else "N/A"
 
             result[sid] = record
 
+    wb.close()
     return result
 
 
