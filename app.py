@@ -76,7 +76,6 @@ import base64
 import pdfplumber
 import unicodedata
 import requests
-import openpyxl
 from io import BytesIO
 from PIL import Image
 from datetime import datetime
@@ -1428,99 +1427,62 @@ _Y8_SURVEY_COLS = [
 def parse_y8_camp_excel(uploaded_file):
     """
     Parse Updated_Leader_Overview.xlsx exported from the Y8 Camp Group Maker.
-    Uses openpyxl directly — no pandas ExcelFile dependency issues.
-
-    Sheet structure (per class sheet e.g. "8A"):
-      - Rows: first block = Freycinet, then a separator row whose Student ID
-        cell contains "BAY OF FIRES", then the Bay of Fires block.
-      - Columns include: Student ID, Student, and all _Y8_SURVEY_COLS.
+    Mirrors the exact pd.ExcelFile / pd.read_excel pattern used in the Camp Groups app.
 
     Returns dict keyed by normalised Student ID string:
         { "12345": { "class": "8A", "camp": "Freycinet", <survey cols> } }
     """
-    # Read into BytesIO so openpyxl gets a clean seekable buffer
-    uploaded_file.seek(0)
-    file_bytes = BytesIO(uploaded_file.read())
-
+    # Lazy import mirrors the Camp Groups app — openpyxl must be importable for
+    # pd.ExcelFile to open .xlsx files. Give a clear message if it's missing.
     try:
-        wb = openpyxl.load_workbook(file_bytes, read_only=True, data_only=True)
-    except Exception as e:
-        raise ValueError(f"Could not open Excel file: {e}")
+        from openpyxl import Workbook  # noqa: F401 — registers openpyxl with pandas
+    except ImportError:
+        raise ValueError(
+            "The openpyxl package is required to read .xlsx files. "
+            "Install it by running:  pip install openpyxl  "
+            "then restart the app."
+        )
+
+    uploaded_file.seek(0)
+    xls = pd.ExcelFile(uploaded_file)
+    sheet_names = xls.sheet_names
 
     result = {}
 
-    for sheet_name in wb.sheetnames:
-        if sheet_name.strip().lower() in _Y8_SKIP_SHEETS:
+    for sheet in sheet_names:
+        if sheet.strip().lower() in _Y8_SKIP_SHEETS:
             continue
 
-        ws = wb[sheet_name]
+        df_class = pd.read_excel(xls, sheet_name=sheet, dtype=str)
+        df_class = df_class.fillna("")
 
-        # Read all rows into a list of lists (cell values as strings)
-        rows = []
-        for row in ws.iter_rows(values_only=True):
-            rows.append([str(v).strip() if v is not None else "" for v in row])
-
-        if len(rows) < 2:
+        # Must have a Student ID column
+        if 'Student ID' not in df_class.columns:
             continue
-
-        # First row is the header
-        headers = [h.strip() for h in rows[0]]
-
-        # Locate Student ID column index
-        id_idx = None
-        for i, h in enumerate(headers):
-            if h.lower() == "student id":
-                id_idx = i
-                break
-        if id_idx is None:
-            for i, h in enumerate(headers):
-                if "student id" in h.lower():
-                    id_idx = i
-                    break
-        if id_idx is None:
-            for i, h in enumerate(headers):
-                if h.lower() == "student":
-                    id_idx = i
-                    break
-        if id_idx is None:
-            continue
-
-        # Build header → column index lookup (case-insensitive)
-        col_idx = {h.lower(): i for i, h in enumerate(headers)}
 
         current_camp = "Freycinet"
 
-        for row in rows[1:]:
-            if not row or id_idx >= len(row):
-                continue
+        for _, row in df_class.iterrows():
+            stud_val = str(row.get('Student', '')).strip()
+            st_id    = str(row.get('Student ID', '')).replace('.0', '').strip()
 
-            raw_id = row[id_idx]
-            upper_id = raw_id.upper()
-
-            # BAY OF FIRES separator row
-            if "BAY OF FIRES" in upper_id:
+            # BAY OF FIRES separator row — same check as Camp Groups app
+            if 'BAY OF FIRES' in stud_val.upper() or 'BAY OF FIRES' in st_id.upper():
                 current_camp = "Bay of Fires"
                 continue
 
-            # Skip blanks / separators / header echoes
-            if (not raw_id
-                    or raw_id.startswith("---")
-                    or raw_id.lower() in ("nan", "n/a", "student id", "student", "")):
+            # Skip blanks and separator rows
+            if not st_id or st_id.lower() in ('nan', 'n/a', '---', 'student id', ''):
+                continue
+            if st_id.startswith('---'):
                 continue
 
-            # Normalise ID — strip trailing .0 from numeric values
-            sid = re.sub(r'\.0$', '', raw_id).strip()
-            if not sid:
-                continue
-
-            record = {"class": sheet_name.strip(), "camp": current_camp}
+            record = {"class": sheet.strip(), "camp": current_camp}
             for col_name in _Y8_SURVEY_COLS:
-                ci = col_idx.get(col_name.lower())
-                record[col_name] = row[ci] if (ci is not None and ci < len(row)) else "N/A"
+                record[col_name] = str(row.get(col_name, 'N/A')).strip()
 
-            result[sid] = record
+            result[st_id] = record
 
-    wb.close()
     return result
 
 
