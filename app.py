@@ -869,6 +869,46 @@ def _read_and_dedup_csv(file_obj):
     )
     return pd.concat([deduped, no_email], ignore_index=True)
 
+def collate_csvs(file_list):
+    """
+    Accepts a list of Streamlit UploadedFile objects (all CSVs with the same
+    column structure) and concatenates them into a single BytesIO object that
+    looks identical to one uploaded file.  This lets the existing matching
+    functions work completely unchanged whether the user uploads one file or ten.
+
+    Deduplication is handled later inside each matching function (by email +
+    Submission Time), so simple concatenation here is safe.
+
+    Returns a BytesIO on success, or None if file_list is empty/None.
+    """
+    if not file_list:
+        return None
+
+    frames = []
+    header = None
+
+    for f in file_list:
+        try:
+            if hasattr(f, 'seek'):
+                f.seek(0)
+            df = pd.read_csv(f)
+            if header is None:
+                header = list(df.columns)
+            frames.append(df)
+        except Exception as e:
+            print(f"[collate_csvs] Could not read '{getattr(f, 'name', '?')}': {e}")
+
+    if not frames:
+        return None
+
+    combined = pd.concat(frames, ignore_index=True)
+    buf = BytesIO()
+    combined.to_csv(buf, index=False)
+    buf.seek(0)
+    buf.name = "collated.csv"   # give it a .name so downstream code is happy
+    return buf
+
+
 def match_swimming_ability(df_main, swimming_csv, contact_df=None):
     """
     Matches swimming ability to students by searching for the student's surname
@@ -2596,37 +2636,37 @@ if t1 is not None:
         st.markdown("""
         <div class="upload-card optional">
           <div class="upload-card-label">Swimming Ability CSV</div>
-          <div class="upload-card-desc">Adds swimming competency to each student profile.</div>
+          <div class="upload-card-desc">Adds swimming competency to each student profile. You can upload multiple files — they'll be combined automatically.</div>
         </div>
         """, unsafe_allow_html=True)
-        swimming_csv = st.file_uploader("Swimming Ability CSV", type="csv", label_visibility="collapsed")
+        swimming_csv_files = st.file_uploader("Swimming Ability CSV", type="csv", label_visibility="collapsed", accept_multiple_files=True)
 
     with col_d:
         st.markdown("""
         <div class="upload-card optional">
           <div class="upload-card-label">Dietary Requirements CSV</div>
-          <div class="upload-card-desc">Adds dietary needs and generates a summary table.</div>
+          <div class="upload-card-desc">Adds dietary needs and generates a summary table. You can upload multiple files — they'll be combined automatically.</div>
         </div>
         """, unsafe_allow_html=True)
-        dietary_csv = st.file_uploader("Dietary Requirements CSV", type="csv", label_visibility="collapsed")
+        dietary_csv_files = st.file_uploader("Dietary Requirements CSV", type="csv", label_visibility="collapsed", accept_multiple_files=True)
 
     with col_e:
         st.markdown("""
         <div class="upload-card optional">
           <div class="upload-card-label">Photo Permissions CSV</div>
-          <div class="upload-card-desc">Adds photo permission status to each profile and generates a no-permission list.</div>
+          <div class="upload-card-desc">Adds photo permission status to each profile and generates a no-permission list. You can upload multiple files — they'll be combined automatically.</div>
         </div>
         """, unsafe_allow_html=True)
-        photo_perm_csv = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed")
+        photo_perm_csv_files = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed", accept_multiple_files=True)
 
     with col_f:
         st.markdown("""
         <div class="upload-card optional">
           <div class="upload-card-label">💊 Camp Medications CSV</div>
-          <div class="upload-card-desc">From the Paperly camp medication form. Adds a medication administration log page to the booklet — only students with medications are shown.</div>
+          <div class="upload-card-desc">From the Paperly camp medication form. Adds a medication administration log page to the booklet — only students with medications are shown. You can upload multiple files — they'll be combined automatically.</div>
         </div>
         """, unsafe_allow_html=True)
-        camp_med_csv = st.file_uploader("Camp Medications CSV", type="csv", label_visibility="collapsed", key="camp_med_csv_uploader")
+        camp_med_csv_files = st.file_uploader("Camp Medications CSV", type="csv", label_visibility="collapsed", key="camp_med_csv_uploader", accept_multiple_files=True)
 
     # ── Y8 Camp Data (optional) ────────────────────────────────────────────────
     st.markdown('<div class="section-head">Optional — Y8 Camp Data</div>', unsafe_allow_html=True)
@@ -2708,21 +2748,37 @@ if t1 is not None:
     elif seqta_contact_pdf and "df_final" not in st.session_state:
         st.warning("Upload the Student List CSV at the same time as the Excursion PDF.")
 
-    if swimming_csv:
-        st.session_state.swimming_csv = swimming_csv
-        st.success("✅ Swimming ability CSV loaded")
+    if swimming_csv_files:
+        collated = collate_csvs(swimming_csv_files)
+        if collated:
+            st.session_state.swimming_csv = collated
+            n = len(swimming_csv_files)
+            label = f"{n} file{'s' if n > 1 else ''} combined" if n > 1 else "1 file"
+            st.success(f"✅ Swimming ability CSV loaded ({label})")
 
-    if dietary_csv:
-        st.session_state.dietary_csv = dietary_csv
-        st.success("✅ Dietary requirements CSV loaded")
+    if dietary_csv_files:
+        collated = collate_csvs(dietary_csv_files)
+        if collated:
+            st.session_state.dietary_csv = collated
+            n = len(dietary_csv_files)
+            label = f"{n} file{'s' if n > 1 else ''} combined" if n > 1 else "1 file"
+            st.success(f"✅ Dietary requirements CSV loaded ({label})")
 
-    if photo_perm_csv:
-        st.session_state.photo_perm_csv = photo_perm_csv
-        st.success("✅ Photo permissions CSV loaded")
+    if photo_perm_csv_files:
+        collated = collate_csvs(photo_perm_csv_files)
+        if collated:
+            st.session_state.photo_perm_csv = collated
+            n = len(photo_perm_csv_files)
+            label = f"{n} file{'s' if n > 1 else ''} combined" if n > 1 else "1 file"
+            st.success(f"✅ Photo permissions CSV loaded ({label})")
 
-    if camp_med_csv:
-        st.session_state.camp_med_csv = camp_med_csv
-        st.success("✅ Camp medications CSV loaded")
+    if camp_med_csv_files:
+        collated = collate_csvs(camp_med_csv_files)
+        if collated:
+            st.session_state.camp_med_csv = collated
+            n = len(camp_med_csv_files)
+            label = f"{n} file{'s' if n > 1 else ''} combined" if n > 1 else "1 file"
+            st.success(f"✅ Camp medications CSV loaded ({label})")
 
     if photos:
         path = os.path.join(TEMP_DIR, "photos.pdf")
