@@ -67,6 +67,14 @@ if 'custom_groups_ungrouped_checked' not in st.session_state:
     st.session_state.custom_groups_ungrouped_checked = False
 if 'y8_camp_data' not in st.session_state:
     st.session_state.y8_camp_data = {}  # { student_id: { 'class': '8A', 'camp': 'Freycinet', ...survey cols... } }
+if 'camp_medication_matched' not in st.session_state:
+    st.session_state.camp_medication_matched = {}  # { student_id: { 'name': str, 'medications': [str] } }
+if 'camp_medication_unmatched' not in st.session_state:
+    st.session_state.camp_medication_unmatched = []  # [ { 'student_name': str, 'medications': [str], 'index': key } ]
+if 'camp_medication_manual' not in st.session_state:
+    st.session_state.camp_medication_manual = {}  # { index_key: student_id }
+if 'camp_days' not in st.session_state:
+    st.session_state.camp_days = 3
 import pandas as pd
 import zipfile
 import yaml
@@ -1134,6 +1142,163 @@ def match_dietary_requirements(df_main, dietary_csv, contact_csv=None):
         import traceback
         print(traceback.format_exc())
         return {}, []
+
+def parse_camp_medication_csv(camp_csv):
+    """
+    Parses the camp medication Paperly form CSV.
+    Expects columns:  Email, First Name, Surname, Student, Submission Time, Status,
+                      'Does your child require any medication…',
+                      'Please describe the medication required (medication 1)',
+                      'Is there any additional medication…',
+                      'Please describe the medication required (medication 2)',
+                      …repeating up to medication 10…,
+                      'Is there any more medication…',
+                      'Please describe the remainder of the medication required…'
+
+    Returns a dict:
+        { student_name_lower: { 'display_name': str, 'medications': [str] } }
+    Only includes students who answered "Yes" to needing medication.
+    Deduplicates by email, keeping the most-recent submission.
+    """
+    try:
+        if hasattr(camp_csv, 'seek'):
+            camp_csv.seek(0)
+
+        df = pd.read_csv(camp_csv).fillna("")
+
+        # Deduplicate by email (keep most-recent)
+        if 'Email' in df.columns and 'Submission Time' in df.columns:
+            df['_time'] = pd.to_datetime(df['Submission Time'], errors='coerce')
+            has_email = df[df['Email'].str.strip() != ""]
+            no_email  = df[df['Email'].str.strip() == ""]
+            deduped = (has_email
+                       .sort_values('_time', ascending=False)
+                       .drop_duplicates(subset=['Email'], keep='first'))
+            df = pd.concat([deduped, no_email], ignore_index=True)
+
+        # Find the "needs medication" column
+        needs_col = next(
+            (c for c in df.columns if 'require any medication' in c.lower()), None
+        )
+        if needs_col is None:
+            return {}
+
+        # All medication *description* columns (in order they appear)
+        desc_cols = [
+            c for c in df.columns
+            if 'describe the medication' in c.lower()
+            or 'remainder of the medication' in c.lower()
+        ]
+
+        result = {}
+        for _, row in df.iterrows():
+            if str(row[needs_col]).strip().lower() != 'yes':
+                continue
+
+            student_name = str(row.get('Student', '')).strip()
+            if not student_name or student_name.lower() == 'nan':
+                continue
+
+            medications = [
+                str(row[c]).strip()
+                for c in desc_cols
+                if str(row[c]).strip() and str(row[c]).strip().lower() != 'nan'
+            ]
+
+            if medications:
+                key = student_name.lower()
+                if key in result:
+                    # Same student submitted twice after dedup — shouldn't normally happen
+                    result[key]['medications'].extend(medications)
+                else:
+                    result[key] = {
+                        'display_name': student_name,
+                        'medications': medications
+                    }
+
+        print(f"[Camp Meds] Parsed {len(result)} students needing medication.")
+        return result
+
+    except Exception as e:
+        print(f"[Camp Meds] parse_camp_medication_csv error: {e}")
+        import traceback; print(traceback.format_exc())
+        return {}
+
+
+def match_camp_medications(df_main, camp_csv):
+    """
+    Matches parsed camp medication data to student IDs in df_main.
+    Uses surname-first matching (same strategy as dietary).
+
+    Returns:
+        matched   = { student_id: { 'name': str, 'medications': [str] } }
+        unmatched = [ { 'student_name': str, 'medications': [str], 'index': key } ]
+    """
+    camp_data = parse_camp_medication_csv(camp_csv)
+
+    if not camp_data:
+        return {}, []
+
+    # Build duplicate-surname set
+    surname_counts = {}
+    for _, row in df_main.iterrows():
+        s = str(row[COLS['surname']]).strip().lower()
+        if s:
+            surname_counts[s] = surname_counts.get(s, 0) + 1
+    duplicate_surnames = {s for s, c in surname_counts.items() if c > 1}
+
+    matched   = {}
+    used_keys = set()
+
+    for _, student_row in df_main.iterrows():
+        student_id     = str(student_row[COLS['student_id']])
+        first_name     = str(student_row[COLS['first_name']]).strip()
+        preferred_name = str(student_row.get('Preferred name', '')).strip()
+        surname        = str(student_row[COLS['surname']]).strip()
+
+        if not surname:
+            continue
+
+        surname_lower = surname.lower()
+        first_lower   = first_name.lower()
+        pref_lower    = preferred_name.lower()
+        has_dup       = surname_lower in duplicate_surnames
+
+        surname_pat = re.compile(r'\b' + re.escape(surname_lower) + r'\b')
+
+        for key, data in camp_data.items():
+            if key in used_keys:
+                continue
+            if not has_dup:
+                if surname_pat.search(key):
+                    matched[student_id] = {
+                        'name': f"{first_name} {surname}",
+                        'medications': data['medications']
+                    }
+                    used_keys.add(key)
+                    break
+            else:
+                if surname_pat.search(key):
+                    first_pat = re.compile(r'\b' + re.escape(first_lower) + r'\b') if first_lower else None
+                    pref_pat  = re.compile(r'\b' + re.escape(pref_lower)  + r'\b') if pref_lower  else None
+                    if (first_pat and first_pat.search(key)) or (pref_pat and pref_pat.search(key)):
+                        matched[student_id] = {
+                            'name': f"{first_name} {surname}",
+                            'medications': data['medications']
+                        }
+                        used_keys.add(key)
+                        break
+
+    # Collect unmatched rows for manual assignment
+    unmatched = [
+        {'student_name': v['display_name'], 'medications': v['medications'], 'index': k}
+        for k, v in camp_data.items()
+        if k not in used_keys
+    ]
+
+    print(f"[Camp Meds] Matched: {len(matched)}  Unmatched: {len(unmatched)}")
+    return matched, unmatched
+
 
 def match_photo_permissions(df_main, photo_perm_csv):
     """
@@ -2426,7 +2591,7 @@ if t1 is not None:
 
     contact_csv = None  # replaced by Excursion Student Info PDF
 
-    col_c, col_d, col_e = st.columns(3)
+    col_c, col_d, col_e, col_f = st.columns(4)
     with col_c:
         st.markdown("""
         <div class="upload-card optional">
@@ -2453,6 +2618,15 @@ if t1 is not None:
         </div>
         """, unsafe_allow_html=True)
         photo_perm_csv = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed")
+
+    with col_f:
+        st.markdown("""
+        <div class="upload-card optional">
+          <div class="upload-card-label">💊 Camp Medications CSV</div>
+          <div class="upload-card-desc">From the Paperly camp medication form. Adds a medication administration log page to the booklet — only students with medications are shown.</div>
+        </div>
+        """, unsafe_allow_html=True)
+        camp_med_csv = st.file_uploader("Camp Medications CSV", type="csv", label_visibility="collapsed", key="camp_med_csv_uploader")
 
     # ── Y8 Camp Data (optional) ────────────────────────────────────────────────
     st.markdown('<div class="section-head">Optional — Y8 Camp Data</div>', unsafe_allow_html=True)
@@ -2546,6 +2720,10 @@ if t1 is not None:
         st.session_state.photo_perm_csv = photo_perm_csv
         st.success("✅ Photo permissions CSV loaded")
 
+    if camp_med_csv:
+        st.session_state.camp_med_csv = camp_med_csv
+        st.success("✅ Camp medications CSV loaded")
+
     if photos:
         path = os.path.join(TEMP_DIR, "photos.pdf")
         with open(path, "wb") as f: f.write(photos.getbuffer())
@@ -2606,6 +2784,12 @@ if t2 is not None:
                 if 'photo_perm_csv' in st.session_state:
                     perm_map = match_photo_permissions(df_final, st.session_state.photo_perm_csv)
                     st.session_state.photo_permissions_map = perm_map
+
+                if 'camp_med_csv' in st.session_state:
+                    camp_matched, camp_unmatched = match_camp_medications(df_final, st.session_state.camp_med_csv)
+                    st.session_state.camp_medication_matched   = camp_matched
+                    st.session_state.camp_medication_unmatched = camp_unmatched
+                    st.session_state.camp_medication_manual    = {}
 
                 st.rerun()
 
@@ -2726,6 +2910,30 @@ if t2 is not None:
                     st.warning(f"📷 Photo Permissions: {yes_count} Yes · {no_count} No · {nr_count} No Response")
                 else:
                     st.success(f"✅ Photo Permissions: All {yes_count} students have given permission")
+
+            # Camp medications matching status
+            if 'camp_med_csv' in st.session_state:
+                camp_matched_st   = st.session_state.get('camp_medication_matched', {})
+                camp_unmatched_st = st.session_state.get('camp_medication_unmatched', [])
+                if camp_unmatched_st:
+                    with st.expander(f"⚠️  {len(camp_unmatched_st)} camp medication record(s) need manual matching  ({len(camp_matched_st)} matched automatically)", expanded=True):
+                        st.caption("These medication submissions couldn't be matched to a student automatically.")
+                        for item in camp_unmatched_st:
+                            _ck = item['index']
+                            _c1, _c2 = st.columns([2, 3])
+                            with _c1:
+                                st.markdown(f"**CSV name:** {item['student_name']}")
+                                for _m in item['medications']:
+                                    st.caption(f"💊 {_m[:80]}{'…' if len(_m)>80 else ''}")
+                            with _c2:
+                                _sel = st.selectbox("Assign to student:", options=student_options, key=f"camp_med_sel_{_ck}")
+                                if _sel != "(Skip)":
+                                    st.session_state.camp_medication_manual[_ck] = name_to_id_map[_sel]
+                                elif _ck in st.session_state.camp_medication_manual:
+                                    del st.session_state.camp_medication_manual[_ck]
+                            st.divider()
+                elif camp_matched_st:
+                    st.success(f"✅ Camp Medications: {len(camp_matched_st)} student(s) with medication matched automatically")
 
             # ── Step 3: Medical plans ─────────────────────────────────────────────
             st.markdown('<div class="section-head">Step 3 — Medical action plans</div>', unsafe_allow_html=True)
@@ -2971,6 +3179,28 @@ if t2 is not None:
                 opt_sec_docs  = st.checkbox("Medical contacts (doctors)",  value=True)
                 opt_sec_learn = st.checkbox("Learning & support",          value=True)
                 opt_sec_home  = st.checkbox("Home contacts",               value=True)
+
+            # ── Camp Medication Log (only if CSV was uploaded) ────────────────────
+            _has_camp_meds = bool(st.session_state.get('camp_medication_matched') or
+                                  st.session_state.get('camp_medication_manual'))
+            if _has_camp_meds:
+                st.markdown('<div class="section-head">💊 Camp Medication Log</div>', unsafe_allow_html=True)
+                _camp_matched_count = len(st.session_state.get('camp_medication_matched', {})) + \
+                                      len(st.session_state.get('camp_medication_manual', {}))
+                st.info(
+                    f"A medication administration log page will be added to the booklet "
+                    f"for **{_camp_matched_count} student(s)** with medications. "
+                    f"Set the number of camp days below so sign-off columns can be generated."
+                )
+                camp_days_input = st.number_input(
+                    "Number of camp days",
+                    min_value=1, max_value=14,
+                    value=st.session_state.get('camp_days', 3),
+                    step=1,
+                    help="One sign-off column will be added per day (for date, time and staff initials).",
+                    key="camp_days_input"
+                )
+                st.session_state.camp_days = int(camp_days_input)
 
             # ── Step 5: Sort & output ─────────────────────────────────────────────
             st.markdown('<div class="section-head">Step 5 — Sort & output</div>', unsafe_allow_html=True)
@@ -3397,6 +3627,29 @@ if t2 is not None:
                         s for s in s_list
                         if s.get('photo_perm') in ('No', 'No Response')
                     ] if display_opts.get('photo_perm') else []
+
+                    # ── Build camp medication list for this subset ────────────────
+                    _camp_med_all = st.session_state.get('camp_medication_matched', {}).copy()
+                    # Apply manual matches
+                    for _mk, _msid in st.session_state.get('camp_medication_manual', {}).items():
+                        if _msid not in _camp_med_all:
+                            for _u in st.session_state.get('camp_medication_unmatched', []):
+                                if _u.get('index') == _mk:
+                                    _fn = id_to_name_map.get(_msid, _msid)
+                                    _camp_med_all[_msid] = {
+                                        'name': _fn,
+                                        'medications': _u['medications']
+                                    }
+                                    break
+                    subset_sids = {r['profile']['id'] for r in records}
+                    camp_medications_for_subset = [
+                        {'name': _camp_med_all[_sid]['name'],
+                         'medications': _camp_med_all[_sid]['medications']}
+                        for _sid in [r['profile']['id'] for r in records]
+                        if _sid in _camp_med_all
+                    ] or None
+                    _camp_days = st.session_state.get('camp_days', 3)
+
                     full_html = tpl.render(
                         title=f"{st.session_state.project_title} {title_suffix}",
                         date=datetime.now().strftime("%d %B %Y"),
@@ -3404,7 +3657,9 @@ if t2 is not None:
                         no_perm_list=no_perm_list,
                         options=display_opts, mode="full",
                         student_count=len(s_list),
-                        y8_camp_group=y8_camp_group
+                        y8_camp_group=y8_camp_group,
+                        camp_medications=camp_medications_for_subset,
+                        camp_days=_camp_days,
                     )
                     return HTML(string=full_html).write_pdf()
 
