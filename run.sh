@@ -202,17 +202,17 @@ apply_icon() {
     # subprocesses don't have one, causing Bus errors. osascript's own
     # host process already has the correct macOS app context built in.
     local ICON_RESULT
+    # Pass POSIX paths as plain strings — "POSIX file X as text" gives HFS
+    # colon-paths which initWithContentsOfFile_ cannot use.
     ICON_RESULT=$(osascript 2>&1 << OSEOF
 use framework "AppKit"
 use scripting additions
-set iconFile to POSIX file "$ICON_PATH"
-set targetFile to POSIX file "$TARGET"
-set theImage to current application's NSImage's alloc()'s initWithContentsOfFile_(iconFile as text)
+set theImage to current application's NSImage's alloc()'s initWithContentsOfFile_("$ICON_PATH")
 if theImage is missing value then
     return "error: NSImage could not load icon"
 end if
 set ws to current application's NSWorkspace's sharedWorkspace()
-set ok to ws's setIcon:theImage forFile:(targetFile as text) options:0
+set ok to ws's setIcon:theImage forFile:"$TARGET" options:0
 if ok then
     return "ok"
 else
