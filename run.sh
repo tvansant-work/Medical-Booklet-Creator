@@ -159,13 +159,14 @@ textColor = "#1a1d2e"
 TOMLEOF
 
 # ── Apply Custom Icon (Cocoa) ─────────────────────────────────────
-# The .command file always lives in the app folder (same as run.sh)
+# Apply to the app folder copy, and also the Desktop if one exists
+# (transition fix for users who dragged the old shortcut there)
 ICON_PATH="$(pwd)/app_icon.png"
-LAUNCHER_PATH="$(pwd)/Open Medical Booklet.command"
 
-if [ -f "$ICON_PATH" ] && [ -f "$LAUNCHER_PATH" ]; then
+apply_icon() {
+    local TARGET="$1"
     if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-        conda run -n "$ENV_NAME" python3 - "$ICON_PATH" "$LAUNCHER_PATH" << 'PYEOF'
+        conda run -n "$ENV_NAME" python3 - "$ICON_PATH" "$TARGET" << 'PYEOF'
 import sys, Cocoa
 icon_path, file_path = sys.argv[1], sys.argv[2]
 img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
@@ -173,7 +174,7 @@ if img:
     Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
 PYEOF
     else
-        $PYTHON - "$ICON_PATH" "$LAUNCHER_PATH" << 'PYEOF'
+        $PYTHON - "$ICON_PATH" "$TARGET" << 'PYEOF'
 import sys, Cocoa
 icon_path, file_path = sys.argv[1], sys.argv[2]
 img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
@@ -181,6 +182,13 @@ if img:
     Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
 PYEOF
     fi
+}
+
+if [ -f "$ICON_PATH" ]; then
+    # Always apply to the app folder copy
+    [ -f "$(pwd)/Open Medical Booklet.command" ] && apply_icon "$(pwd)/Open Medical Booklet.command"
+    # Also apply to Desktop copy if one exists (one-time transition for existing users)
+    [ -f "$HOME/Desktop/Open Medical Booklet.command" ] && apply_icon "$HOME/Desktop/Open Medical Booklet.command"
 fi
 
 # ── Launch ────────────────────────────────────────────────────────
