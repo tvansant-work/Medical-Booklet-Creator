@@ -9,3 +9,4 @@ pypdf
 watchdog
 requests
 openpyxl
+pyobjc-framework-Cocoa

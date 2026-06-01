@@ -90,46 +90,29 @@ secondaryBackgroundColor = "#ffffff"
 textColor = "#1a1d2e"
 TOMLEOF
 
-# ── Apply Custom Icon (native macOS, no Python dependency) ────────
+# ── Apply Custom Icon ─────────────────────────────────────────────
 ICON_PATH="$(pwd)/app_icon.png"
 LAUNCHER_PATH="$(pwd)/Open Medical Booklet.command"
 
 if [ -f "$ICON_PATH" ] && [ -f "$LAUNCHER_PATH" ]; then
-    TMP_ICONSET="/tmp/mb_icon.iconset"
-    TMP_ICNS="/tmp/mb_icon.icns"
-    mkdir -p "$TMP_ICONSET"
-    sips -z 16 16     "$ICON_PATH" --out "$TMP_ICONSET/icon_16x16.png"      &>/dev/null
-    sips -z 32 32     "$ICON_PATH" --out "$TMP_ICONSET/icon_16x16@2x.png"   &>/dev/null
-    sips -z 128 128   "$ICON_PATH" --out "$TMP_ICONSET/icon_128x128.png"    &>/dev/null
-    sips -z 256 256   "$ICON_PATH" --out "$TMP_ICONSET/icon_128x128@2x.png" &>/dev/null
-    sips -z 512 512   "$ICON_PATH" --out "$TMP_ICONSET/icon_256x256@2x.png" &>/dev/null
-    iconutil -c icns "$TMP_ICONSET" -o "$TMP_ICNS" 2>/dev/null
-
-    if [ -f "$TMP_ICNS" ]; then
-        osascript - "$LAUNCHER_PATH" "$TMP_ICNS" <<'OSAEOF' 2>/dev/null
-        on run argv
-            set targetFile to POSIX file (item 1 of argv)
-            set icnsFile to POSIX file (item 2 of argv)
-            set imgData to (read icnsFile as «class icns»)
-            tell application "Finder"
-                set icon of (targetFile as alias) to imgData
-            end tell
-        end run
-OSAEOF
-        # Wait for Finder to finish writing the icon resource
-        sleep 2
+    if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
+        conda run -n "$ENV_NAME" python3 - "$ICON_PATH" "$LAUNCHER_PATH" << 'PYEOF'
+import sys, Cocoa
+icon_path, file_path = sys.argv[1], sys.argv[2]
+img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
+if img:
+    Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
+PYEOF
+    else
+        $PYTHON - "$ICON_PATH" "$LAUNCHER_PATH" << 'PYEOF'
+import sys, Cocoa
+icon_path, file_path = sys.argv[1], sys.argv[2]
+img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
+if img:
+    Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
+PYEOF
     fi
-    rm -rf "$TMP_ICONSET" "$TMP_ICNS"
 fi
-
-# ── Clear Finder Icon Cache (AFTER icon is written) ───────────────
-echo "  🖼️  Refreshing desktop icon..."
-(
-    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister \
-        -kill -r -domain local -domain system -domain user &>/dev/null
-    sleep 1
-    killall Finder 2>/dev/null
-) &
 
 # ── Launch ────────────────────────────────────────────────────────
 echo ""
