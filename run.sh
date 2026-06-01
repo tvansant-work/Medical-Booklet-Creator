@@ -6,12 +6,80 @@
 
 # If double-clicked in Finder, relaunch inside a visible Terminal window
 if [ -z "$TERM" ] && [ "$(uname)" = "Darwin" ]; then
-    SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/run.command"
+    SCRIPT_PATH="$(cd "$(dirname "$0")" && pwd)/Open Medical Booklet.command"
     open -a Terminal "$SCRIPT_PATH"
     exit 0
 fi
 
 cd "$(dirname "$0")"
+
+# ── Configuration ─────────────────────────────────────────────────
+GITHUB_USER="tvansant-work"
+GITHUB_REPO="Medical-Booklet-Creator"
+BRANCH="main"
+
+# ── Auto-Update from GitHub ───────────────────────────────────────
+echo ""
+echo "  🔄  Checking for updates..."
+
+fetch_and_report() {
+  local URL="$1"
+  local DEST="$2"
+  local LABEL="$3"
+  local TMP="${DEST}.tmp"
+
+  curl -s -L -H "Cache-Control: no-cache" -H "Pragma: no-cache" -o "$TMP" "$URL"
+
+  if [ ! -s "$TMP" ]; then
+    rm -f "$TMP"
+    return 1
+  fi
+
+  if [ -f "$DEST" ]; then
+    OLD_SUM=$(md5 -q "$DEST" 2>/dev/null || md5sum "$DEST" | cut -d' ' -f1)
+    NEW_SUM=$(md5 -q "$TMP"  2>/dev/null || md5sum "$TMP"  | cut -d' ' -f1)
+    if [ "$OLD_SUM" = "$NEW_SUM" ]; then
+      rm -f "$TMP"
+      return 1
+    else
+      mv "$TMP" "$DEST"
+      echo "  ✅  Updated: $LABEL"
+      return 0
+    fi
+  else
+    mv "$TMP" "$DEST"
+    echo "  ✅  New file: $LABEL"
+    return 0
+  fi
+}
+
+# Resolve exact commit SHA to bypass CDN caching
+LATEST_SHA=$(curl -s -f \
+  -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/$GITHUB_USER/$GITHUB_REPO/commits/$BRANCH" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['sha'])" 2>/dev/null)
+
+if [ -n "$LATEST_SHA" ]; then
+  RAW_BASE="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$LATEST_SHA"
+else
+  RAW_BASE="https://raw.githubusercontent.com/$GITHUB_USER/$GITHUB_REPO/$BRANCH"
+fi
+
+# Check run.sh first — if updated, re-exec so new logic runs immediately
+fetch_and_report "$RAW_BASE/run.sh" "run.sh" "run.sh"
+if [ $? -eq 0 ]; then
+  chmod +x run.sh
+  echo "  ↩️  Launcher updated — restarting with new version..."
+  exec bash run.sh
+fi
+
+fetch_and_report "$RAW_BASE/app.py"           "app.py"           "app.py"
+fetch_and_report "$RAW_BASE/requirements.txt" "requirements.txt" "requirements.txt"
+fetch_and_report "$RAW_BASE/app_icon.png"     "app_icon.png"     "app_icon.png"
+fetch_and_report "$RAW_BASE/config.yaml"      "config.yaml"      "config.yaml"
+fetch_and_report "$RAW_BASE/profiles.html"    "profiles.html"    "profiles.html"
+
+echo "  ✔️  Up to date."
 
 # ── Set library path for WeasyPrint (conda path) ─────────────────
 if [ -f ".conda-lib-path" ]; then
@@ -60,9 +128,7 @@ if [ -z "$PYTHON" ] || ! $PYTHON -c "import streamlit" &>/dev/null 2>&1; then
     exit 1
 fi
 
-# ── Auto-Install Missing Packages ─────────────────────────────────
-# This ensures existing users get new packages (like openpyxl) 
-# automatically after the GitHub pull, without needing setup.sh
+# ── Install any new/missing packages ─────────────────────────────
 echo ""
 echo "  📦  Verifying required packages..."
 if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
@@ -72,14 +138,13 @@ else
 fi
 
 # ── Bypass Streamlit Welcome Prompt ───────────────────────────────
-# Prevents Streamlit from hanging/crashing when asking for an email
 mkdir -p ~/.streamlit
 if [ ! -f ~/.streamlit/credentials.toml ]; then
     echo "[general]" > ~/.streamlit/credentials.toml
     echo 'email = ""' >> ~/.streamlit/credentials.toml
 fi
 
-# ── Force light theme always (ignores OS/browser dark mode) ───────
+# ── Force light theme always ───────────────────────────────────────
 mkdir -p .streamlit
 cat > .streamlit/config.toml << 'TOMLEOF'
 [theme]
@@ -90,7 +155,7 @@ secondaryBackgroundColor = "#ffffff"
 textColor = "#1a1d2e"
 TOMLEOF
 
-# ── Apply Custom Icon ─────────────────────────────────────────────
+# ── Apply Custom Icon (Cocoa) ─────────────────────────────────────
 ICON_PATH="$(pwd)/app_icon.png"
 LAUNCHER_PATH="$(pwd)/Open Medical Booklet.command"
 
@@ -124,7 +189,6 @@ echo "      Press Ctrl+C to stop the app."
 echo ""
 
 if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-    # Pass library path through to conda run subprocess
     DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH" \
     DYLD_FALLBACK_LIBRARY_PATH="$DYLD_FALLBACK_LIBRARY_PATH" \
     conda run -n "$ENV_NAME" \

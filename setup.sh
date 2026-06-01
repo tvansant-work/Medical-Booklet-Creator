@@ -74,9 +74,6 @@ echo ""
 
 # ─────────────────────────────────────────────
 # PRE-STEP: AUTO-ACCEPT CHANNEL ToS
-# Newer conda versions prompt for Terms of Service
-# for certain channels. Set this once so no
-# interactive prompt appears during setup.
 # ─────────────────────────────────────────────
 
 if [ "$INSTALL_METHOD" = "conda" ]; then
@@ -86,14 +83,7 @@ fi
 echo ""
 
 # ─────────────────────────────────────────────
-# STEP 2: CREATE PYTHON ENVIRONMENT + INSTALL
-# LIBRARIES AND PACKAGES TOGETHER
-#
-# KEY FIX: For conda, we install pango/cairo INTO
-# the app environment (not base), then write an
-# activation hook so DYLD_LIBRARY_PATH is set
-# automatically — this is what WeasyPrint needs
-# to find libgobject at runtime.
+# STEP 2: CREATE PYTHON ENVIRONMENT + INSTALL PACKAGES
 # ─────────────────────────────────────────────
 
 if [ "$INSTALL_METHOD" = "conda" ]; then
@@ -102,11 +92,8 @@ if [ "$INSTALL_METHOD" = "conda" ]; then
     echo "   (This installs pango and cairo alongside Python — may take a few minutes)"
     echo ""
 
-    # Remove old environment if it exists, so we start clean
     conda env remove -n medical-booklet -q 2>/dev/null
 
-    # Create environment with pango + cairo installed directly into it
-    # This ensures WeasyPrint can find the .dylib files at the right path
     conda create -y -q -n medical-booklet \
         python=3.11 \
         pango \
@@ -123,34 +110,23 @@ if [ "$INSTALL_METHOD" = "conda" ]; then
     conda run -n medical-booklet pip install --upgrade pip -q
     conda run -n medical-booklet pip install -r requirements.txt -q
 
-    # ── CRITICAL FIX: Write a conda activation hook ──────────────
-    # This sets DYLD_LIBRARY_PATH to the environment's lib/ folder
-    # every time the environment is activated (including via conda run).
-    # Without this, WeasyPrint cannot find libgobject-2.0-0 at import time.
-
-    # Find where the environment was installed
+    # Write conda activation hook for WeasyPrint library path
     ENV_LIB="$(conda run -n medical-booklet python -c "import sys, os; print(os.path.join(os.path.dirname(sys.executable), '..', 'lib'))" 2>/dev/null | xargs realpath 2>/dev/null)"
 
     if [ -n "$ENV_LIB" ] && [ -d "$ENV_LIB" ]; then
-        # Create the activation hooks directory
         ENV_PREFIX="$(conda run -n medical-booklet python -c "import sys; print(sys.prefix)" 2>/dev/null)"
         HOOK_DIR="$ENV_PREFIX/etc/conda/activate.d"
         mkdir -p "$HOOK_DIR"
 
         cat > "$HOOK_DIR/weasyprint-libs.sh" << HOOKEOF
 #!/bin/bash
-# Set library path so WeasyPrint can find libgobject and friends
 export DYLD_LIBRARY_PATH="${ENV_LIB}:\${DYLD_LIBRARY_PATH}"
 export DYLD_FALLBACK_LIBRARY_PATH="${ENV_LIB}:\${DYLD_FALLBACK_LIBRARY_PATH}"
 HOOKEOF
 
         echo "   ✅ Library path hook written to environment."
-    else
-        echo "   ⚠️  Could not determine env lib path — writing fallback."
     fi
 
-    # Also write the lib path to a local file so run.command can set it directly
-    # (conda run doesn't always execute activation hooks)
     conda run -n medical-booklet python -c \
         "import sys, os; print(os.path.normpath(os.path.join(sys.prefix, 'lib')))" \
         2>/dev/null > .conda-lib-path
@@ -160,7 +136,6 @@ HOOKEOF
 
 else
 
-    # ── Homebrew path ─────────────────────────────
     echo "▶  Installing PDF rendering libraries..."
     brew install pango cairo gobject-introspection 2>&1 | grep -E "(Installing|Pouring|already installed|Error)"
     echo "   ✅ Libraries ready."
@@ -193,6 +168,7 @@ else
 fi
 
 echo ""
+
 # ── Create double-clickable launcher ─────────
 echo "▶  Creating launcher shortcut..."
 
@@ -201,16 +177,6 @@ cat > "$LAUNCHER" << 'LAUNCHEOF'
 #!/bin/bash
 # Medical Booklet Creator — double-click launcher
 cd "$HOME/Documents/medical-booklet"
-
-# Fast Auto-Update
-echo ""
-echo "  🔄  Checking for updates..."
-if curl -fsSL https://github.com/tvansant-work/Medical-Booklet-Creator/archive/refs/heads/main.zip -o /tmp/mb_update.zip 2>/dev/null; then
-    unzip -o -q /tmp/mb_update.zip -d /tmp/ >/dev/null 2>&1
-    cp -a /tmp/Medical-Booklet-Creator-main/. ./
-    rm -rf /tmp/mb_update.zip /tmp/Medical-Booklet-Creator-main
-fi
-
 bash run.sh
 LAUNCHEOF
 
