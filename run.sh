@@ -90,19 +90,35 @@ secondaryBackgroundColor = "#ffffff"
 textColor = "#1a1d2e"
 TOMLEOF
 
-# ── Apply Custom Icon ─────────────────────────────────────────────
-# This uses the Python environment to stamp app_icon.png onto the launcher
+# ── Apply Custom Icon (native macOS, no Python dependency) ────────
 ICON_PATH="$(pwd)/app_icon.png"
 LAUNCHER_PATH="$(pwd)/Open Medical Booklet.command"
 
 if [ -f "$ICON_PATH" ] && [ -f "$LAUNCHER_PATH" ]; then
-    if [ "$METHOD" = "venv" ] && [ -n "$PYTHON" ]; then
-        "$(dirname "$PYTHON")/pip" install pyobjc-framework-Cocoa --quiet
-        "$PYTHON" -c "import Cocoa, os; img = Cocoa.NSImage.alloc().initWithContentsOfFile_('$ICON_PATH'); Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, '$LAUNCHER_PATH', 0) if img else None" 2>/dev/null
-    elif [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-        conda run -n "$ENV_NAME" pip install pyobjc-framework-Cocoa --quiet
-        conda run -n "$ENV_NAME" python -c "import Cocoa, os; img = Cocoa.NSImage.alloc().initWithContentsOfFile_('$ICON_PATH'); Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, '$LAUNCHER_PATH', 0) if img else None" 2>/dev/null
+    # Convert PNG → ICNS using sips (built into macOS)
+    TMP_ICONSET="/tmp/mb_icon.iconset"
+    TMP_ICNS="/tmp/mb_icon.icns"
+    mkdir -p "$TMP_ICONSET"
+    sips -z 16 16     "$ICON_PATH" --out "$TMP_ICONSET/icon_16x16.png"    &>/dev/null
+    sips -z 32 32     "$ICON_PATH" --out "$TMP_ICONSET/icon_16x16@2x.png" &>/dev/null
+    sips -z 128 128   "$ICON_PATH" --out "$TMP_ICONSET/icon_128x128.png"  &>/dev/null
+    sips -z 256 256   "$ICON_PATH" --out "$TMP_ICONSET/icon_128x128@2x.png" &>/dev/null
+    sips -z 512 512   "$ICON_PATH" --out "$TMP_ICONSET/icon_256x256@2x.png" &>/dev/null
+    iconutil -c icns "$TMP_ICONSET" -o "$TMP_ICNS" 2>/dev/null
+    if [ -f "$TMP_ICNS" ]; then
+        # Use fileicon (if available) or the Finder trick via osascript
+        osascript - "$LAUNCHER_PATH" "$TMP_ICNS" <<'OSAEOF' &>/dev/null
+        on run argv
+            set targetFile to POSIX file (item 1 of argv)
+            set icnsFile to POSIX file (item 2 of argv)
+            set imgData to (read icnsFile as «class icns»)
+            tell application "Finder"
+                set icon of (targetFile as alias) to imgData
+            end tell
+        end run
+OSAEOF
     fi
+    rm -rf "$TMP_ICONSET" "$TMP_ICNS"
 fi
 
 # ── Launch ────────────────────────────────────────────────────────

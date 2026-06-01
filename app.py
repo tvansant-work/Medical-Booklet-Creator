@@ -100,7 +100,7 @@ os.makedirs(TEMP_DIR, exist_ok=True)
 st.set_page_config(
     page_title="Medical Booklet Tools",
     layout="wide",
-    page_icon="📋",
+    page_icon=Image.open(os.path.join(BASE_DIR, "app_icon.png")) if os.path.exists(os.path.join(BASE_DIR, "app_icon.png")) else "📋",
     menu_items={
         "Get help": None,
         "Report a bug": None,
