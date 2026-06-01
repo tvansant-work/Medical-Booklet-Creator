@@ -197,21 +197,38 @@ else
 fi
 
 echo ""
-# ── Create Desktop Shortcut & Apply Icons ─────────────────────────
-echo "▶  Creating Desktop shortcut..."
+# ── Create Desktop Launcher & Apply Icon ──────────────────────────
+echo "▶  Creating Desktop launcher..."
 SHORTCUT_NAME="Open Medical Booklet.command"
 SOURCE_PATH="$(pwd)/$SHORTCUT_NAME"
 DESKTOP_PATH="$HOME/Desktop/$SHORTCUT_NAME"
 ICON_PATH="$(pwd)/app_icon.png"
 
-# Ensure the source is executable
+# Ensure the in-app launcher is executable
 chmod +x "$SOURCE_PATH" 2>/dev/null
 
-# Create a symbolic link on the Desktop (overwrites if already there)
-ln -sf "$SOURCE_PATH" "$DESKTOP_PATH"
-
-# Make the shortcut itself executable (macOS requirement for .command files)
-chmod +x "$DESKTOP_PATH" 2>/dev/null
+# Write a real stub file directly to Desktop — NOT a symlink.
+#
+# Why a real file matters for the icon:
+#   macOS stores custom icons as extended attributes (xattrs) on the
+#   specific inode.  A symlink on the Desktop doesn't own an inode of
+#   its own, so icons set via NSWorkspace actually land on the target
+#   file inside the app folder.  When run.sh auto-updates that target
+#   via `mv`, the old inode (and its icon xattr) is discarded and
+#   the icon disappears from the Desktop.
+#
+#   A real file on the Desktop owns its own inode.  The stub content
+#   is three lines that never change, so it's never replaced with `mv`
+#   — only ever written with `cat >` (which preserves xattrs).
+#   The icon therefore survives app updates indefinitely.
+cat > "$DESKTOP_PATH" << 'STUBEOF'
+#!/bin/bash
+# Medical Booklet Creator — double-click launcher
+# stub-v2
+cd "$HOME/Documents/medical-booklet"
+bash run.sh
+STUBEOF
+chmod +x "$DESKTOP_PATH"
 
 # Function to apply icon using the newly installed PyObjC
 apply_icon() {
@@ -226,15 +243,14 @@ Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(image, '$TARGET', 0
     fi
 }
 
-echo "▶  Applying custom icons..."
-apply_icon "$SOURCE_PATH"
+echo "▶  Applying custom icon to Desktop launcher..."
 apply_icon "$DESKTOP_PATH"
 
-# Force Finder to refresh the icons
+# Force Finder to refresh and display the new icon
 echo "▶  Refreshing Desktop..."
 killall Finder 2>/dev/null || true
 
-echo "   ✅ Shortcut created on Desktop."
+echo "   ✅ Launcher created on Desktop."
 echo ""
 
 echo "══════════════════════════════════════════════"
