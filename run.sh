@@ -188,7 +188,6 @@ apply_icon() {
     local TARGET="$1"
     echo "  🖼️  Applying icon to: $(basename "$TARGET")"
 
-    # Verify both files exist before attempting anything
     if [ ! -f "$ICON_PATH" ]; then
         echo "  ⚠️  Icon PNG not found at: $ICON_PATH"
         return 1
@@ -198,56 +197,36 @@ apply_icon() {
         return 1
     fi
 
-    # Write Python to a temp file using PID for a guaranteed-unique name
-    local PY_TMP="/tmp/mb_set_icon_$$.py"
-    cat > "$PY_TMP" << 'PYEOF'
-import sys
-try:
-    import Cocoa
-    icon_path, file_path = sys.argv[1], sys.argv[2]
-    img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
-    if not img:
-        print("NSImage failed to load: " + icon_path)
-        sys.exit(1)
-    ok = Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
-    if ok:
-        print("ok")
-    else:
-        print("setIcon returned False")
-        sys.exit(1)
-except ImportError as e:
-    print("ImportError: " + str(e))
-    sys.exit(1)
-except Exception as e:
-    print("Error: " + str(e))
-    sys.exit(1)
-PYEOF
-
-    # Resolve the real Python binary and call it directly.
-    # "conda run" creates a subprocess without a proper macOS app context,
-    # which causes a Bus error when pyobjc tries to use NSWorkspace/Cocoa.
-    # Calling the env's python3 binary directly avoids this entirely.
-    local ICON_PYTHON=""
-    if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-        ICON_PYTHON="$(conda run -n "$ENV_NAME" which python3 2>/dev/null)"
-    fi
-    [ -z "$ICON_PYTHON" ] && ICON_PYTHON="$PYTHON"
-
+    # Use osascript's ASObjC bridge instead of Python/pyobjc.
+    # NSWorkspace requires a running NSApplication context — plain Python
+    # subprocesses don't have one, causing Bus errors. osascript's own
+    # host process already has the correct macOS app context built in.
     local ICON_RESULT
-    ICON_RESULT=$("$ICON_PYTHON" "$PY_TMP" "$ICON_PATH" "$TARGET" 2>&1)
-    rm -f "$PY_TMP"
+    ICON_RESULT=$(osascript 2>&1 << OSEOF
+use framework "AppKit"
+use scripting additions
+set iconFile to POSIX file "$ICON_PATH"
+set targetFile to POSIX file "$TARGET"
+set theImage to current application's NSImage's alloc()'s initWithContentsOfFile_(iconFile as text)
+if theImage is missing value then
+    return "error: NSImage could not load icon"
+end if
+set ws to current application's NSWorkspace's sharedWorkspace()
+set ok to ws's setIcon:theImage forFile:(targetFile as text) options:0
+if ok then
+    return "ok"
+else
+    return "error: setIcon returned false"
+end if
+OSEOF
+)
 
     if [ "$ICON_RESULT" = "ok" ]; then
         echo "  ✅  Icon set. Refreshing Finder..."
-        # Touch both the file and its parent folder — forces Finder to redraw
         touch "$TARGET"
         touch "$(dirname "$TARGET")"
-        # Tell Finder explicitly to re-read this item
-        osascript -e "
-            tell application \"Finder\"
-                update item (POSIX file \"$TARGET\" as alias)
-            end tell
-        " 2>&1 && echo "  ✅  Finder refreshed." || echo "  ⚠️  Finder refresh via osascript failed (icon still set — may appear after Finder restart)."
+        osascript -e "tell application \"Finder\" to update item (POSIX file \"$TARGET\" as alias)" 2>/dev/null || true
+        echo "  ✅  Done."
     else
         echo "  ⚠️  Icon not set: $ICON_RESULT"
     fi
