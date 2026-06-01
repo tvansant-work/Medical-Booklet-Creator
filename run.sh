@@ -121,6 +121,14 @@ OSAEOF
     rm -rf "$TMP_ICONSET" "$TMP_ICNS"
 fi
 
+# ── Clear Finder Icon Cache ───────────────────────────────────────
+echo "  🖼️  Refreshing desktop icon..."
+(
+    /System/Library/Frameworks/CoreServices.framework/Versions/A/Frameworks/LaunchServices.framework/Versions/A/Support/lsregister \
+        -kill -r -domain local -domain system -domain user &>/dev/null
+    killall Finder 2>/dev/null
+) &
+
 # ── Launch ────────────────────────────────────────────────────────
 echo ""
 echo "  ✅  Starting Medical Booklet Creator..."
