@@ -198,9 +198,8 @@ apply_icon() {
         return 1
     fi
 
-    # Write Python to a temp file — heredocs don't feed through conda run reliably
-    local PY_TMP
-    PY_TMP="$(mktemp /tmp/mb_icon_XXXXXX.py)"
+    # Write Python to a temp file using PID for a guaranteed-unique name
+    local PY_TMP="/tmp/mb_set_icon_$$.py"
     cat > "$PY_TMP" << 'PYEOF'
 import sys
 try:
@@ -224,13 +223,18 @@ except Exception as e:
     sys.exit(1)
 PYEOF
 
-    # Set the icon via NSWorkspace
-    local ICON_RESULT
+    # Resolve the real Python binary and call it directly.
+    # "conda run" creates a subprocess without a proper macOS app context,
+    # which causes a Bus error when pyobjc tries to use NSWorkspace/Cocoa.
+    # Calling the env's python3 binary directly avoids this entirely.
+    local ICON_PYTHON=""
     if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-        ICON_RESULT=$(conda run -n "$ENV_NAME" python3 "$PY_TMP" "$ICON_PATH" "$TARGET" 2>&1)
-    else
-        ICON_RESULT=$($PYTHON "$PY_TMP" "$ICON_PATH" "$TARGET" 2>&1)
+        ICON_PYTHON="$(conda run -n "$ENV_NAME" which python3 2>/dev/null)"
     fi
+    [ -z "$ICON_PYTHON" ] && ICON_PYTHON="$PYTHON"
+
+    local ICON_RESULT
+    ICON_RESULT=$("$ICON_PYTHON" "$PY_TMP" "$ICON_PATH" "$TARGET" 2>&1)
     rm -f "$PY_TMP"
 
     if [ "$ICON_RESULT" = "ok" ]; then
