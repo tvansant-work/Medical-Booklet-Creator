@@ -262,17 +262,12 @@ apply_icon() {
 # redisplay it until its icon cache is cleared and it restarts.
 # We do this once after applying all icons, not per-file.
 bust_finder_cache() {
-    echo "  🔄  Clearing Finder icon cache and restarting Finder..."
+    echo "  🔄  Restarting Finder to display icons..."
 
-    # 1. Clear the on-disk Finder icon cache databases
-    find ~/Library/Caches/com.apple.finder -name "*.db" -delete 2>/dev/null || true
-
-    # 2. Clear the icon services cache (covers macOS 12+)
-    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
-        -kill -r -domain local -domain system -domain user 2>/dev/null || true
-
-    # 3. Restart Finder — this is the step that makes the icon visibly update
-    #    on the Desktop. "reopen" brings it back immediately.
+    # Quit and reopen Finder — all that's needed to make NSWorkspace-written
+    # icons appear on the Desktop.
+    # Avoid lsregister -kill: it rebuilds the Launch Services database from
+    # scratch and can evict freshly-written icon data before Finder reads it.
     osascript -e 'tell application "Finder" to quit' 2>/dev/null || true
     sleep 1
     open -a Finder 2>/dev/null || true
@@ -282,11 +277,26 @@ bust_finder_cache() {
 
 echo ""
 if [ -f "$ICON_PATH" ]; then
-    # Apply icon to every copy of the launcher found on this Mac
+    LAUNCHER_NAME="Open Medical Booklet.command"
+
+    # ── Apply to known locations directly (no Spotlight dependency) ───────
+    # mdfind is asynchronous: a file created seconds ago may not be indexed
+    # yet, so relying on it alone means the icon is silently skipped on the
+    # first run.  Hardcoding the two canonical paths guarantees the icon is
+    # always applied regardless of Spotlight latency.
+    for KNOWN_PATH in         "$HOME/Desktop/$LAUNCHER_NAME"         "$(pwd)/$LAUNCHER_NAME"
+    do
+        [ -f "$KNOWN_PATH" ] && apply_icon "$KNOWN_PATH"
+    done
+
+    # ── Also cover any additional copies found by Spotlight ───────────────
     while IFS= read -r FOUND_PATH; do
+        # Skip paths already handled above to avoid double-applying
+        [ "$(realpath "$FOUND_PATH" 2>/dev/null)" = "$(realpath "$HOME/Desktop/$LAUNCHER_NAME" 2>/dev/null)" ] && continue
+        [ "$(realpath "$FOUND_PATH" 2>/dev/null)" = "$(realpath "$(pwd)/$LAUNCHER_NAME" 2>/dev/null)" ] && continue
         [ -f "$FOUND_PATH" ] && apply_icon "$FOUND_PATH"
-    done < <(mdfind -name "Open Medical Booklet.command" 2>/dev/null)
-    # Force Finder to redisplay all updated icons
+    done < <(mdfind -name "$LAUNCHER_NAME" 2>/dev/null)
+
     bust_finder_cache
 else
     echo "  ⚠️  app_icon.png not found — skipping icon update."

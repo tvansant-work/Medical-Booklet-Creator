@@ -105,7 +105,7 @@ if [ "$INSTALL_METHOD" = "conda" ]; then
     echo ""
 
     # Remove old environment if it exists, so we start clean
-    conda env remove -n medical-booklet -q 2>/dev/null
+    conda env remove -n medical-booklet -y -q 2>/dev/null
 
     # Create environment with pango + cairo installed directly into it
     # This ensures WeasyPrint can find the .dylib files at the right path
@@ -230,25 +230,53 @@ bash run.sh
 STUBEOF
 chmod +x "$DESKTOP_PATH"
 
-# Function to apply icon using the newly installed PyObjC
+# Apply icon using osascript + AppKit (same method as run.sh — no PyObjC dependency)
 apply_icon() {
     local TARGET="$1"
-    if [ -f "$ICON_PATH" ] && [ -n "$PYTHON_EXEC" ]; then
-        $PYTHON_EXEC -c "
-import Cocoa
-import os
-image = Cocoa.NSImage.alloc().initWithContentsOfFile_('$ICON_PATH')
-Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(image, '$TARGET', 0)
-" 2>/dev/null
+    if [ ! -f "$ICON_PATH" ]; then
+        echo "   ⚠️  Icon not found: $ICON_PATH"; return 1
+    fi
+    if [ ! -f "$TARGET" ]; then
+        echo "   ⚠️  Target not found: $TARGET"; return 1
+    fi
+
+    local TMPSCRIPT
+    TMPSCRIPT="$(mktemp /tmp/apply_icon_XXXXXX.applescript)"
+    printf 'use framework "AppKit"\n'                                                                             >  "$TMPSCRIPT"
+    printf 'use scripting additions\n'                                                                           >> "$TMPSCRIPT"
+    printf 'set iconPath to "%s"\n'   "$ICON_PATH"                                                              >> "$TMPSCRIPT"
+    printf 'set targetPath to "%s"\n' "$TARGET"                                                                 >> "$TMPSCRIPT"
+    printf 'set theImage to current application'\''s NSImage'\''s alloc()'\''s initWithContentsOfFile_(iconPath)\n' >> "$TMPSCRIPT"
+    printf 'if theImage is missing value then\n'                                                                 >> "$TMPSCRIPT"
+    printf '    return "error: could not load icon PNG"\n'                                                      >> "$TMPSCRIPT"
+    printf 'end if\n'                                                                                            >> "$TMPSCRIPT"
+    printf 'set ws to current application'\''s NSWorkspace'\''s sharedWorkspace()\n'                           >> "$TMPSCRIPT"
+    printf 'set ok to ws'\''s setIcon:theImage forFile:targetPath options:0\n'                                  >> "$TMPSCRIPT"
+    printf 'if ok then\n'                                                                                        >> "$TMPSCRIPT"
+    printf '    return "ok"\n'                                                                                   >> "$TMPSCRIPT"
+    printf 'else\n'                                                                                              >> "$TMPSCRIPT"
+    printf '    return "error: setIcon returned false"\n'                                                       >> "$TMPSCRIPT"
+    printf 'end if\n'                                                                                            >> "$TMPSCRIPT"
+
+    local RESULT
+    RESULT=$(osascript "$TMPSCRIPT" 2>&1)
+    rm -f "$TMPSCRIPT"
+
+    if [ "$RESULT" = "ok" ]; then
+        echo "   ✅ Icon applied to: $(basename "$TARGET")"
+    else
+        echo "   ⚠️  Icon not set on $(basename "$TARGET"): $RESULT"
     fi
 }
 
 echo "▶  Applying custom icon to Desktop launcher..."
 apply_icon "$DESKTOP_PATH"
 
-# Force Finder to refresh and display the new icon
+# Restart Finder so it picks up the new icon immediately
 echo "▶  Refreshing Desktop..."
-killall Finder 2>/dev/null || true
+osascript -e 'tell application "Finder" to quit' 2>/dev/null || true
+sleep 1
+open -a Finder 2>/dev/null || true
 
 echo "   ✅ Launcher created on Desktop."
 echo ""
