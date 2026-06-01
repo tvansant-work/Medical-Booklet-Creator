@@ -235,15 +235,35 @@ apply_icon() {
     rm -f "$TMPSCRIPT"
 
     if [ "$ICON_RESULT" = "ok" ]; then
-        echo "  ✅  Icon set. Refreshing Finder..."
+        echo "  ✅  Icon written to: $TARGET"
         touch "$TARGET"
-        touch "$(dirname "$TARGET")"
-        # Refresh Finder — quote the path properly in the inline script
-        osascript -e "tell application \"Finder\" to update item (POSIX file \"$TARGET\" as alias)" 2>/dev/null || true
-        echo "  ✅  Done."
     else
-        echo "  ⚠️  Icon not set: $ICON_RESULT"
+        echo "  ⚠️  Icon not set on $TARGET: $ICON_RESULT"
     fi
+}
+
+# ── Finder cache bust ─────────────────────────────────────────────
+# macOS aggressively caches custom icons for Desktop items.
+# setIcon:forFile: writes the data correctly but Finder won't
+# redisplay it until its icon cache is cleared and it restarts.
+# We do this once after applying all icons, not per-file.
+bust_finder_cache() {
+    echo "  🔄  Clearing Finder icon cache and restarting Finder..."
+
+    # 1. Clear the on-disk Finder icon cache databases
+    find ~/Library/Caches/com.apple.finder -name "*.db" -delete 2>/dev/null || true
+
+    # 2. Clear the icon services cache (covers macOS 12+)
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister \
+        -kill -r -domain local -domain system -domain user 2>/dev/null || true
+
+    # 3. Restart Finder — this is the step that makes the icon visibly update
+    #    on the Desktop. "reopen" brings it back immediately.
+    osascript -e 'tell application "Finder" to quit' 2>/dev/null || true
+    sleep 1
+    open -a Finder 2>/dev/null || true
+
+    echo "  ✅  Finder restarted — icon should now be visible."
 }
 
 echo ""
@@ -254,6 +274,8 @@ if [ -f "$ICON_PATH" ]; then
     if [ -f "$DESKTOP_LAUNCHER" ]; then
         apply_icon "$DESKTOP_LAUNCHER"
     fi
+    # Force Finder to redisplay the new icon
+    bust_finder_cache
 else
     echo "  ⚠️  app_icon.png not found — skipping icon update."
 fi
