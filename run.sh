@@ -84,6 +84,27 @@ chmod +x "Open Medical Booklet.command" 2>/dev/null
 
 echo "  ✔️  Up to date."
 
+# ── Rewrite old Desktop launcher ──────────────────────────────────
+# Old Desktop launchers contain a full ZIP-download block and can't
+# self-update. We overwrite them with a simple stub so they stay in
+# sync going forward. The icon is applied to this file below.
+DESKTOP_LAUNCHER="$HOME/Desktop/Open Medical Booklet.command"
+if [ -f "$DESKTOP_LAUNCHER" ]; then
+    if ! grep -qF "stub-v2" "$DESKTOP_LAUNCHER" 2>/dev/null; then
+        echo ""
+        echo "  🔄  Updating Desktop launcher to current version..."
+        cat > "$DESKTOP_LAUNCHER" << 'STUBEOF'
+#!/bin/bash
+# Medical Booklet Creator — double-click launcher
+# stub-v2
+cd "$HOME/Documents/medical-booklet"
+bash run.sh
+STUBEOF
+        chmod +x "$DESKTOP_LAUNCHER"
+        echo "  ✅  Desktop launcher updated."
+    fi
+fi
+
 # ── Set library path for WeasyPrint (conda path) ─────────────────
 if [ -f ".conda-lib-path" ]; then
     ENV_LIB_PATH="$(cat .conda-lib-path)"
@@ -177,57 +198,40 @@ apply_icon() {
         return 1
     fi
 
+    # Write Python to a temp file — heredocs don't feed through conda run reliably
+    local PY_TMP
+    PY_TMP="$(mktemp /tmp/mb_icon_XXXXXX.py)"
+    cat > "$PY_TMP" << 'PYEOF'
+import sys
+try:
+    import Cocoa
+    icon_path, file_path = sys.argv[1], sys.argv[2]
+    img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
+    if not img:
+        print("NSImage failed to load: " + icon_path)
+        sys.exit(1)
+    ok = Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
+    if ok:
+        print("ok")
+    else:
+        print("setIcon returned False")
+        sys.exit(1)
+except ImportError as e:
+    print("ImportError: " + str(e))
+    sys.exit(1)
+except Exception as e:
+    print("Error: " + str(e))
+    sys.exit(1)
+PYEOF
+
     # Set the icon via NSWorkspace
     local ICON_RESULT
     if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-        ICON_RESULT=$(conda run -n "$ENV_NAME" python3 - "$ICON_PATH" "$TARGET" 2>&1 << 'PYEOF'
-import sys, os
-try:
-    import Cocoa
-    icon_path, file_path = sys.argv[1], sys.argv[2]
-    img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
-    if not img:
-        print(f"NSImage failed to load: {icon_path}")
-        sys.exit(1)
-    ok = Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
-    if ok:
-        print("ok")
-    else:
-        print("setIcon returned False")
-        sys.exit(1)
-except ImportError as e:
-    print(f"ImportError: {e}")
-    sys.exit(1)
-except Exception as e:
-    print(f"Error: {e}")
-    sys.exit(1)
-PYEOF
-)
+        ICON_RESULT=$(conda run -n "$ENV_NAME" python3 "$PY_TMP" "$ICON_PATH" "$TARGET" 2>&1)
     else
-        ICON_RESULT=$($PYTHON - "$ICON_PATH" "$TARGET" 2>&1 << 'PYEOF'
-import sys, os
-try:
-    import Cocoa
-    icon_path, file_path = sys.argv[1], sys.argv[2]
-    img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
-    if not img:
-        print(f"NSImage failed to load: {icon_path}")
-        sys.exit(1)
-    ok = Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
-    if ok:
-        print("ok")
-    else:
-        print("setIcon returned False")
-        sys.exit(1)
-except ImportError as e:
-    print(f"ImportError: {e}")
-    sys.exit(1)
-except Exception as e:
-    print(f"Error: {e}")
-    sys.exit(1)
-PYEOF
-)
+        ICON_RESULT=$($PYTHON "$PY_TMP" "$ICON_PATH" "$TARGET" 2>&1)
     fi
+    rm -f "$PY_TMP"
 
     if [ "$ICON_RESULT" = "ok" ]; then
         echo "  ✅  Icon set. Refreshing Finder..."
