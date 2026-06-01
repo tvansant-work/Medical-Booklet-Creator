@@ -159,73 +159,98 @@ textColor = "#1a1d2e"
 TOMLEOF
 
 # ── Apply Custom Icon (Cocoa) ─────────────────────────────────────
-# Apply to the app folder copy, and also the Desktop if one exists.
-# We re-apply on every launch because the auto-updater (mv) strips
-# extended attributes from the .command file, wiping any previously
-# set icon. After setting, we touch the file and tell Finder to
-# refresh so the new icon appears immediately without a logout.
+# Re-applied every launch because the auto-updater (mv) strips the
+# com.apple.FinderInfo extended attribute that stores the custom icon.
 ICON_PATH="$(pwd)/app_icon.png"
 
-_run_icon_python() {
-    # $1 = python runner prefix (e.g. "conda run -n medical-booklet python3" or "$PYTHON")
-    local RUNNER="$1"
-    local ICON="$2"
-    local TARGET="$3"
-    $RUNNER - "$ICON" "$TARGET" << 'PYEOF'
+apply_icon() {
+    local TARGET="$1"
+    echo "  🖼️  Applying icon to: $(basename "$TARGET")"
+
+    # Verify both files exist before attempting anything
+    if [ ! -f "$ICON_PATH" ]; then
+        echo "  ⚠️  Icon PNG not found at: $ICON_PATH"
+        return 1
+    fi
+    if [ ! -f "$TARGET" ]; then
+        echo "  ⚠️  Target not found: $TARGET"
+        return 1
+    fi
+
+    # Set the icon via NSWorkspace
+    local ICON_RESULT
+    if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
+        ICON_RESULT=$(conda run -n "$ENV_NAME" python3 - "$ICON_PATH" "$TARGET" 2>&1 << 'PYEOF'
 import sys, os
 try:
     import Cocoa
     icon_path, file_path = sys.argv[1], sys.argv[2]
-
-    if not os.path.isfile(icon_path):
-        print(f"  ⚠️  Icon file not found: {icon_path}", file=sys.stderr)
-        sys.exit(1)
-    if not os.path.exists(file_path):
-        print(f"  ⚠️  Target not found: {file_path}", file=sys.stderr)
-        sys.exit(1)
-
     img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
     if not img:
-        print(f"  ⚠️  NSImage could not load: {icon_path}", file=sys.stderr)
+        print(f"NSImage failed to load: {icon_path}")
         sys.exit(1)
-
     ok = Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
-    if not ok:
-        print(f"  ⚠️  setIcon returned False for: {file_path}", file=sys.stderr)
+    if ok:
+        print("ok")
+    else:
+        print("setIcon returned False")
         sys.exit(1)
-
-except ImportError:
-    print("  ⚠️  pyobjc-framework-Cocoa not available — skipping icon.", file=sys.stderr)
+except ImportError as e:
+    print(f"ImportError: {e}")
     sys.exit(1)
 except Exception as e:
-    print(f"  ⚠️  Icon error: {e}", file=sys.stderr)
+    print(f"Error: {e}")
     sys.exit(1)
 PYEOF
-}
-
-apply_icon() {
-    local TARGET="$1"
-    local OK=0
-
-    if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-        _run_icon_python "conda run -n $ENV_NAME python3" "$ICON_PATH" "$TARGET" && OK=1
+)
     else
-        _run_icon_python "$PYTHON" "$ICON_PATH" "$TARGET" && OK=1
+        ICON_RESULT=$($PYTHON - "$ICON_PATH" "$TARGET" 2>&1 << 'PYEOF'
+import sys, os
+try:
+    import Cocoa
+    icon_path, file_path = sys.argv[1], sys.argv[2]
+    img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
+    if not img:
+        print(f"NSImage failed to load: {icon_path}")
+        sys.exit(1)
+    ok = Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
+    if ok:
+        print("ok")
+    else:
+        print("setIcon returned False")
+        sys.exit(1)
+except ImportError as e:
+    print(f"ImportError: {e}")
+    sys.exit(1)
+except Exception as e:
+    print(f"Error: {e}")
+    sys.exit(1)
+PYEOF
+)
     fi
 
-    if [ $OK -eq 1 ]; then
-        # Touch the file so Finder notices the metadata change immediately
+    if [ "$ICON_RESULT" = "ok" ]; then
+        echo "  ✅  Icon set. Refreshing Finder..."
+        # Touch both the file and its parent folder — forces Finder to redraw
         touch "$TARGET"
-        # Ask Finder to redraw the icon — suppressed if Finder isn't running
-        osascript -e "tell application \"Finder\" to update item (POSIX file \"$TARGET\" as alias)" 2>/dev/null || true
+        touch "$(dirname "$TARGET")"
+        # Tell Finder explicitly to re-read this item
+        osascript -e "
+            tell application \"Finder\"
+                update item (POSIX file \"$TARGET\" as alias)
+            end tell
+        " 2>&1 && echo "  ✅  Finder refreshed." || echo "  ⚠️  Finder refresh via osascript failed (icon still set — may appear after Finder restart)."
+    else
+        echo "  ⚠️  Icon not set: $ICON_RESULT"
     fi
 }
 
+echo ""
 if [ -f "$ICON_PATH" ]; then
-    # Always apply to the app folder copy
-    [ -f "$(pwd)/Open Medical Booklet.command" ] && apply_icon "$(pwd)/Open Medical Booklet.command"
-    # Also apply to Desktop copy if one exists (covers existing users who have it there)
+    apply_icon "$(pwd)/Open Medical Booklet.command"
     [ -f "$HOME/Desktop/Open Medical Booklet.command" ] && apply_icon "$HOME/Desktop/Open Medical Booklet.command"
+else
+    echo "  ⚠️  app_icon.png not found — skipping icon update."
 fi
 
 # ── Launch ────────────────────────────────────────────────────────
