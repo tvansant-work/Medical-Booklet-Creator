@@ -96,6 +96,8 @@ echo ""
 # to find libgobject at runtime.
 # ─────────────────────────────────────────────
 
+PYTHON_EXEC=""
+
 if [ "$INSTALL_METHOD" = "conda" ]; then
 
     echo "▶  Creating Python environment with PDF libraries..."
@@ -157,6 +159,7 @@ HOOKEOF
 
     echo "conda" > .install-method
     echo "medical-booklet" > .conda-env-name
+    PYTHON_EXEC="conda run -n medical-booklet python"
 
 else
 
@@ -177,6 +180,7 @@ else
 
     echo "venv" > .install-method
     echo "   ✅ Environment created."
+    PYTHON_EXEC=".venv/bin/python"
 
 fi
 
@@ -193,11 +197,12 @@ else
 fi
 
 echo ""
-# ── Create Desktop Shortcut ───────────────────────────────────────
+# ── Create Desktop Shortcut & Apply Icons ─────────────────────────
 echo "▶  Creating Desktop shortcut..."
 SHORTCUT_NAME="Open Medical Booklet.command"
 SOURCE_PATH="$(pwd)/$SHORTCUT_NAME"
 DESKTOP_PATH="$HOME/Desktop/$SHORTCUT_NAME"
+ICON_PATH="$(pwd)/app_icon.png"
 
 # Ensure the source is executable
 chmod +x "$SOURCE_PATH" 2>/dev/null
@@ -206,7 +211,28 @@ chmod +x "$SOURCE_PATH" 2>/dev/null
 ln -sf "$SOURCE_PATH" "$DESKTOP_PATH"
 
 # Make the shortcut itself executable (macOS requirement for .command files)
-chmod +x "$DESKTOP_PATH"
+chmod +x "$DESKTOP_PATH" 2>/dev/null
+
+# Function to apply icon using the newly installed PyObjC
+apply_icon() {
+    local TARGET="$1"
+    if [ -f "$ICON_PATH" ] && [ -n "$PYTHON_EXEC" ]; then
+        $PYTHON_EXEC -c "
+import Cocoa
+import os
+image = Cocoa.NSImage.alloc().initWithContentsOfFile_('$ICON_PATH')
+Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(image, '$TARGET', 0)
+" 2>/dev/null
+    fi
+}
+
+echo "▶  Applying custom icons..."
+apply_icon "$SOURCE_PATH"
+apply_icon "$DESKTOP_PATH"
+
+# Force Finder to refresh the icons
+echo "▶  Refreshing Desktop..."
+killall Finder 2>/dev/null || true
 
 echo "   ✅ Shortcut created on Desktop."
 echo ""
