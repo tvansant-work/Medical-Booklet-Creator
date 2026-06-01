@@ -90,6 +90,21 @@ secondaryBackgroundColor = "#ffffff"
 textColor = "#1a1d2e"
 TOMLEOF
 
+# ── Apply Custom Icon ─────────────────────────────────────────────
+# This uses the Python environment to stamp app_icon.png onto the launcher
+ICON_PATH="$(pwd)/app_icon.png"
+LAUNCHER_PATH="$(pwd)/Open Medical Booklet.command"
+
+if [ -f "$ICON_PATH" ] && [ -f "$LAUNCHER_PATH" ]; then
+    if [ "$METHOD" = "venv" ] && [ -n "$PYTHON" ]; then
+        "$(dirname "$PYTHON")/pip" install pyobjc-framework-Cocoa --quiet
+        "$PYTHON" -c "import Cocoa, os; img = Cocoa.NSImage.alloc().initWithContentsOfFile_('$ICON_PATH'); Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, '$LAUNCHER_PATH', 0) if img else None" 2>/dev/null
+    elif [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
+        conda run -n "$ENV_NAME" pip install pyobjc-framework-Cocoa --quiet
+        conda run -n "$ENV_NAME" python -c "import Cocoa, os; img = Cocoa.NSImage.alloc().initWithContentsOfFile_('$ICON_PATH'); Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, '$LAUNCHER_PATH', 0) if img else None" 2>/dev/null
+    fi
+fi
+
 # ── Launch ────────────────────────────────────────────────────────
 echo ""
 echo "  ✅  Starting Medical Booklet Creator..."
