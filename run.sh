@@ -84,26 +84,40 @@ chmod +x "Open Medical Booklet.command" 2>/dev/null
 
 echo "  ✔️  Up to date."
 
-# ── Rewrite old Desktop launcher ──────────────────────────────────
-# Old Desktop launchers contain a full ZIP-download block and can't
-# self-update. We overwrite them with a simple stub so they stay in
-# sync going forward.
-DESKTOP_LAUNCHER="$HOME/Desktop/Open Medical Booklet.command"
-if [ -f "$DESKTOP_LAUNCHER" ]; then
-    if ! grep -qF "stub-v2" "$DESKTOP_LAUNCHER" 2>/dev/null; then
-        echo ""
-        echo "  🔄  Updating Desktop launcher to current version..."
-        cat > "$DESKTOP_LAUNCHER" << 'STUBEOF'
+# ── Normalise all copies of the launcher (wherever they live) ─────
+# Old launchers (pre stub-v2) contain a full ZIP-download block and
+# can't self-update. We find every copy on this Mac via Spotlight and
+# overwrite any that are out of date with the current slim stub.
+# This runs silently for already-current stubs (grep exits early),
+# so it's safe to run on every launch.
+#
+# Covers: Desktop, Downloads, Documents, pinned Dock aliases, etc.
+# Does NOT touch the authoritative copy in the app folder itself —
+# that one is managed by fetch_and_report above.
+APP_DIR="$(pwd)"
+STUB_MARKER="stub-v2"
+
+while IFS= read -r FOUND_PATH; do
+    # Skip the in-folder copy — that's managed by the GitHub updater
+    [ "$(realpath "$FOUND_PATH" 2>/dev/null)" = "$(realpath "$APP_DIR/Open Medical Booklet.command" 2>/dev/null)" ] && continue
+    # Skip if it's already the current stub
+    grep -qF "$STUB_MARKER" "$FOUND_PATH" 2>/dev/null && continue
+
+    echo ""
+    echo "  🔄  Updating launcher: $FOUND_PATH"
+    cat > "$FOUND_PATH" << 'STUBEOF'
 #!/bin/bash
 # Medical Booklet Creator — double-click launcher
 # stub-v2
 cd "$HOME/Documents/medical-booklet"
 bash run.sh
 STUBEOF
-        chmod +x "$DESKTOP_LAUNCHER"
-        echo "  ✅  Desktop launcher updated."
-    fi
-fi
+    chmod +x "$FOUND_PATH"
+    echo "  ✅  Updated: $(basename "$FOUND_PATH") → $(dirname "$FOUND_PATH")"
+done < <(mdfind -name "Open Medical Booklet.command" 2>/dev/null)
+
+# Keep DESKTOP_LAUNCHER variable for the icon-apply step below
+DESKTOP_LAUNCHER="$HOME/Desktop/Open Medical Booklet.command"
 
 # ── Set library path for WeasyPrint (conda path) ─────────────────
 if [ -f ".conda-lib-path" ]; then
@@ -268,13 +282,11 @@ bust_finder_cache() {
 
 echo ""
 if [ -f "$ICON_PATH" ]; then
-    # Apply to the in-folder launcher
-    apply_icon "$(pwd)/Open Medical Booklet.command"
-    # Apply to the Desktop shortcut (the one users actually double-click)
-    if [ -f "$DESKTOP_LAUNCHER" ]; then
-        apply_icon "$DESKTOP_LAUNCHER"
-    fi
-    # Force Finder to redisplay the new icon
+    # Apply icon to every copy of the launcher found on this Mac
+    while IFS= read -r FOUND_PATH; do
+        [ -f "$FOUND_PATH" ] && apply_icon "$FOUND_PATH"
+    done < <(mdfind -name "Open Medical Booklet.command" 2>/dev/null)
+    # Force Finder to redisplay all updated icons
     bust_finder_cache
 else
     echo "  ⚠️  app_icon.png not found — skipping icon update."
