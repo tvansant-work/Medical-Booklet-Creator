@@ -159,35 +159,72 @@ textColor = "#1a1d2e"
 TOMLEOF
 
 # ── Apply Custom Icon (Cocoa) ─────────────────────────────────────
-# Apply to the app folder copy, and also the Desktop if one exists
-# (transition fix for users who dragged the old shortcut there)
+# Apply to the app folder copy, and also the Desktop if one exists.
+# We re-apply on every launch because the auto-updater (mv) strips
+# extended attributes from the .command file, wiping any previously
+# set icon. After setting, we touch the file and tell Finder to
+# refresh so the new icon appears immediately without a logout.
 ICON_PATH="$(pwd)/app_icon.png"
+
+_run_icon_python() {
+    # $1 = python runner prefix (e.g. "conda run -n medical-booklet python3" or "$PYTHON")
+    local RUNNER="$1"
+    local ICON="$2"
+    local TARGET="$3"
+    $RUNNER - "$ICON" "$TARGET" << 'PYEOF'
+import sys, os
+try:
+    import Cocoa
+    icon_path, file_path = sys.argv[1], sys.argv[2]
+
+    if not os.path.isfile(icon_path):
+        print(f"  ⚠️  Icon file not found: {icon_path}", file=sys.stderr)
+        sys.exit(1)
+    if not os.path.exists(file_path):
+        print(f"  ⚠️  Target not found: {file_path}", file=sys.stderr)
+        sys.exit(1)
+
+    img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
+    if not img:
+        print(f"  ⚠️  NSImage could not load: {icon_path}", file=sys.stderr)
+        sys.exit(1)
+
+    ok = Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
+    if not ok:
+        print(f"  ⚠️  setIcon returned False for: {file_path}", file=sys.stderr)
+        sys.exit(1)
+
+except ImportError:
+    print("  ⚠️  pyobjc-framework-Cocoa not available — skipping icon.", file=sys.stderr)
+    sys.exit(1)
+except Exception as e:
+    print(f"  ⚠️  Icon error: {e}", file=sys.stderr)
+    sys.exit(1)
+PYEOF
+}
 
 apply_icon() {
     local TARGET="$1"
+    local OK=0
+
     if [ "$METHOD" = "conda" ] && [ -n "$ENV_NAME" ]; then
-        conda run -n "$ENV_NAME" python3 - "$ICON_PATH" "$TARGET" << 'PYEOF'
-import sys, Cocoa
-icon_path, file_path = sys.argv[1], sys.argv[2]
-img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
-if img:
-    Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
-PYEOF
+        _run_icon_python "conda run -n $ENV_NAME python3" "$ICON_PATH" "$TARGET" && OK=1
     else
-        $PYTHON - "$ICON_PATH" "$TARGET" << 'PYEOF'
-import sys, Cocoa
-icon_path, file_path = sys.argv[1], sys.argv[2]
-img = Cocoa.NSImage.alloc().initWithContentsOfFile_(icon_path)
-if img:
-    Cocoa.NSWorkspace.sharedWorkspace().setIcon_forFile_options_(img, file_path, 0)
-PYEOF
+        _run_icon_python "$PYTHON" "$ICON_PATH" "$TARGET" && OK=1
+    fi
+
+    if [ $OK -eq 1 ]; then
+        # Touch the file so Finder notices the metadata change immediately
+        touch "$TARGET"
+        # Ask Finder to redraw the icon — suppressed if Finder isn't running
+        osascript -e "tell application \"Finder\" to update item (POSIX file \"$TARGET\" as alias)" 2>/dev/null || true
     fi
 }
 
 if [ -f "$ICON_PATH" ]; then
     # Always apply to the app folder copy
     [ -f "$(pwd)/Open Medical Booklet.command" ] && apply_icon "$(pwd)/Open Medical Booklet.command"
-    # Also apply to Desktop copy if one exists (one-time transition for existing users)
+    # Also apply to Desktop copy if one exists (covers existing users who have it there)
     [ -f "$HOME/Desktop/Open Medical Booklet.command" ] && apply_icon "$HOME/Desktop/Open Medical Booklet.command"
 fi
 
