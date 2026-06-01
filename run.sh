@@ -87,7 +87,7 @@ echo "  ✔️  Up to date."
 # ── Rewrite old Desktop launcher ──────────────────────────────────
 # Old Desktop launchers contain a full ZIP-download block and can't
 # self-update. We overwrite them with a simple stub so they stay in
-# sync going forward. The icon is applied to this file below.
+# sync going forward.
 DESKTOP_LAUNCHER="$HOME/Desktop/Open Medical Booklet.command"
 if [ -f "$DESKTOP_LAUNCHER" ]; then
     if ! grep -qF "stub-v2" "$DESKTOP_LAUNCHER" 2>/dev/null; then
@@ -180,8 +180,16 @@ textColor = "#1a1d2e"
 TOMLEOF
 
 # ── Apply Custom Icon (Cocoa) ─────────────────────────────────────
-# Re-applied every launch because the auto-updater (mv) strips the
-# com.apple.FinderInfo extended attribute that stores the custom icon.
+# Re-applied every launch because:
+#   1. The auto-updater (mv) strips com.apple.FinderInfo (the xattr
+#      that stores the custom icon) from updated files.
+#   2. You may push a new app_icon.png to GitHub at any time —
+#      this block ensures all users pick it up automatically on
+#      their next launch.
+#
+# FIX: paths are written into the AppleScript via a temp file
+# (set … to POSIX file "…") rather than bare heredoc expansion,
+# which broke silently when paths contained spaces.
 ICON_PATH="$(pwd)/app_icon.png"
 
 apply_icon() {
@@ -197,34 +205,40 @@ apply_icon() {
         return 1
     fi
 
-    # Use osascript's ASObjC bridge instead of Python/pyobjc.
-    # NSWorkspace requires a running NSApplication context — plain Python
-    # subprocesses don't have one, causing Bus errors. osascript's own
-    # host process already has the correct macOS app context built in.
+    # Write a temp AppleScript file so we can safely embed paths that
+    # contain spaces or special characters — heredoc expansion inside
+    # osascript source breaks on filenames with spaces (e.g. the
+    # "Open Medical Booklet.command" filename itself).
+    local TMPSCRIPT
+    TMPSCRIPT="$(mktemp /tmp/apply_icon_XXXXXX.applescript)"
+
+    # Use printf so the paths land inside AppleScript string literals
+    # exactly, with no shell word-splitting or glob expansion.
+    printf 'use framework "AppKit"\n' > "$TMPSCRIPT"
+    printf 'use scripting additions\n' >> "$TMPSCRIPT"
+    printf 'set iconPath to "%s"\n' "$ICON_PATH" >> "$TMPSCRIPT"
+    printf 'set targetPath to "%s"\n' "$TARGET" >> "$TMPSCRIPT"
+    printf 'set theImage to current application'\''s NSImage'\''s alloc()'\''s initWithContentsOfFile_(iconPath)\n' >> "$TMPSCRIPT"
+    printf 'if theImage is missing value then\n' >> "$TMPSCRIPT"
+    printf '    return "error: NSImage could not load icon"\n' >> "$TMPSCRIPT"
+    printf 'end if\n' >> "$TMPSCRIPT"
+    printf 'set ws to current application'\''s NSWorkspace'\''s sharedWorkspace()\n' >> "$TMPSCRIPT"
+    printf 'set ok to ws'\''s setIcon:theImage forFile:targetPath options:0\n' >> "$TMPSCRIPT"
+    printf 'if ok then\n' >> "$TMPSCRIPT"
+    printf '    return "ok"\n' >> "$TMPSCRIPT"
+    printf 'else\n' >> "$TMPSCRIPT"
+    printf '    return "error: setIcon returned false"\n' >> "$TMPSCRIPT"
+    printf 'end if\n' >> "$TMPSCRIPT"
+
     local ICON_RESULT
-    # Pass POSIX paths as plain strings — "POSIX file X as text" gives HFS
-    # colon-paths which initWithContentsOfFile_ cannot use.
-    ICON_RESULT=$(osascript 2>&1 << OSEOF
-use framework "AppKit"
-use scripting additions
-set theImage to current application's NSImage's alloc()'s initWithContentsOfFile_("$ICON_PATH")
-if theImage is missing value then
-    return "error: NSImage could not load icon"
-end if
-set ws to current application's NSWorkspace's sharedWorkspace()
-set ok to ws's setIcon:theImage forFile:"$TARGET" options:0
-if ok then
-    return "ok"
-else
-    return "error: setIcon returned false"
-end if
-OSEOF
-)
+    ICON_RESULT=$(osascript "$TMPSCRIPT" 2>&1)
+    rm -f "$TMPSCRIPT"
 
     if [ "$ICON_RESULT" = "ok" ]; then
         echo "  ✅  Icon set. Refreshing Finder..."
         touch "$TARGET"
         touch "$(dirname "$TARGET")"
+        # Refresh Finder — quote the path properly in the inline script
         osascript -e "tell application \"Finder\" to update item (POSIX file \"$TARGET\" as alias)" 2>/dev/null || true
         echo "  ✅  Done."
     else
@@ -234,8 +248,12 @@ OSEOF
 
 echo ""
 if [ -f "$ICON_PATH" ]; then
+    # Apply to the in-folder launcher
     apply_icon "$(pwd)/Open Medical Booklet.command"
-    [ -f "$HOME/Desktop/Open Medical Booklet.command" ] && apply_icon "$HOME/Desktop/Open Medical Booklet.command"
+    # Apply to the Desktop shortcut (the one users actually double-click)
+    if [ -f "$DESKTOP_LAUNCHER" ]; then
+        apply_icon "$DESKTOP_LAUNCHER"
+    fi
 else
     echo "  ⚠️  app_icon.png not found — skipping icon update."
 fi
