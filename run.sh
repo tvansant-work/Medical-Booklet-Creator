@@ -1,7 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────
 #  Medical Booklet Creator — Launcher
-#  Double-click this file in Finder to launch the app
 # ─────────────────────────────────────────────
 
 # If double-clicked in Finder, relaunch inside a visible Terminal window
@@ -73,11 +72,15 @@ if [ $? -eq 0 ]; then
   exec bash run.sh
 fi
 
-fetch_and_report "$RAW_BASE/app.py"           "app.py"           "app.py"
-fetch_and_report "$RAW_BASE/requirements.txt" "requirements.txt" "requirements.txt"
-fetch_and_report "$RAW_BASE/app_icon.png"     "app_icon.png"     "app_icon.png"
-fetch_and_report "$RAW_BASE/config.yaml"      "config.yaml"      "config.yaml"
-fetch_and_report "$RAW_BASE/profiles.html"    "profiles.html"    "profiles.html"
+fetch_and_report "$RAW_BASE/app.py"                        "app.py"                        "app.py"
+fetch_and_report "$RAW_BASE/requirements.txt"              "requirements.txt"              "requirements.txt"
+fetch_and_report "$RAW_BASE/app_icon.png"                  "app_icon.png"                  "app_icon.png"
+fetch_and_report "$RAW_BASE/config.yaml"                   "config.yaml"                   "config.yaml"
+fetch_and_report "$RAW_BASE/profiles.html"                 "profiles.html"                 "profiles.html"
+fetch_and_report "$RAW_BASE/Open Medical Booklet.command"  "Open Medical Booklet.command"  "Open Medical Booklet.command"
+
+# Ensure launcher is always executable after update
+chmod +x "Open Medical Booklet.command" 2>/dev/null
 
 echo "  ✔️  Up to date."
 
@@ -156,6 +159,7 @@ textColor = "#1a1d2e"
 TOMLEOF
 
 # ── Apply Custom Icon (Cocoa) ─────────────────────────────────────
+# The .command file always lives in the app folder (same as run.sh)
 ICON_PATH="$(pwd)/app_icon.png"
 LAUNCHER_PATH="$(pwd)/Open Medical Booklet.command"
 
