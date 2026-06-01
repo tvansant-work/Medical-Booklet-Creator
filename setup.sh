@@ -193,16 +193,31 @@ else
 fi
 
 echo ""
-# ── Ensure launcher is executable (it comes from the repo) ───────
-chmod +x "Open Medical Booklet.command" 2>/dev/null
+# ── Create Desktop Shortcut ───────────────────────────────────────
+echo "▶  Creating Desktop shortcut..."
+SHORTCUT_NAME="Open Medical Booklet.command"
+SOURCE_PATH="$(pwd)/$SHORTCUT_NAME"
+DESKTOP_PATH="$HOME/Desktop/$SHORTCUT_NAME"
+
+# Ensure the source is executable
+chmod +x "$SOURCE_PATH" 2>/dev/null
+
+# Create a symbolic link on the Desktop (overwrites if already there)
+ln -sf "$SOURCE_PATH" "$DESKTOP_PATH"
+
+# Make the shortcut itself executable (macOS requirement for .command files)
+chmod +x "$DESKTOP_PATH"
+
+echo "   ✅ Shortcut created on Desktop."
+echo ""
 
 echo "══════════════════════════════════════════════"
 echo "   ✅  Setup complete!"
 echo ""
 echo "   ▶  How to open the app:"
 echo "      Double-click 'Open Medical Booklet.command'"
-echo "      in your ~/Documents/medical-booklet folder"
+echo "      on your Desktop."
 echo ""
-echo "   Or from Terminal: bash ~/Documents/medical-booklet/run.sh"
+echo "   Or from Terminal: bash \"$(pwd)/run.sh\""
 echo "══════════════════════════════════════════════"
 echo ""
