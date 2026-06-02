@@ -48,7 +48,7 @@ swimming_file_mappings:
   parent_first_name: "First Name"
   parent_surname: "Surname"
   student_name: "Student"
-  swimming_ability: ""  # Last unnamed column (column index 6)
+  swimming_ability: "Swimming Ability"  # Named column in current Paperly export
 
 dietary_file_mappings:
   student_name: "Student"  # Column containing student full name

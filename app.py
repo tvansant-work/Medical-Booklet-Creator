@@ -848,16 +848,25 @@ def _build_parent_lookup_from_pdf(seqta_matched):
 
 def _read_and_dedup_csv(file_obj):
     """
-    Reads a Paperly-format CSV (Email, First Name, Surname, Submission Time, Status, Value)
-    and deduplicates rows by email, keeping the most recent submission.
+    Reads a Paperly-format CSV and deduplicates rows by email, keeping the most
+    recent submission.  Finds Email and Submission Time by column name rather than
+    position so that extra columns (e.g. User Group Status) don't shift the index.
     Returns the cleaned DataFrame.
     """
     if hasattr(file_obj, 'seek'):
         file_obj.seek(0)
     df = pd.read_csv(file_obj).fillna("")
 
-    col_email = df.columns[0]
-    col_time  = df.columns[3]
+    # Find by name — robust to extra columns being inserted at any position
+    col_email = next((c for c in df.columns if c.lower() == 'email'), df.columns[0])
+    col_time  = next((c for c in df.columns if 'submission time' in c.lower()), None)
+
+    if col_time is None:
+        # No time column — just deduplicate by email without sorting
+        has_email = df[df[col_email].astype(str).str.strip() != ""]
+        no_email  = df[df[col_email].astype(str).str.strip() == ""]
+        deduped = has_email.drop_duplicates(subset=[col_email], keep='first')
+        return pd.concat([deduped, no_email], ignore_index=True)
 
     df[col_time] = pd.to_datetime(df[col_time], errors='coerce')
     has_email = df[df[col_email].astype(str).str.strip() != ""]
@@ -932,17 +941,52 @@ def match_swimming_ability(df_main, swimming_csv, contact_df=None):
         if hasattr(swimming_csv, 'seek'):
             swimming_csv.seek(0)
 
-        col_names = ['Email', 'First Name', 'Surname', 'Student', 'Submission Time', 'Status', 'Swimming Ability']
-        swim_df = pd.read_csv(swimming_csv, names=col_names, skiprows=1).fillna("")
-
-        student_col = 'Student'
-        ability_col = 'Swimming Ability'
+        # Read with actual headers — don't hardcode column positions.
+        # The Paperly form export added a "User Group Status" column between
+        # "Status" and "Swimming Ability", pushing ability to index 7.
+        # Reading real headers makes this robust to future column additions.
+        swim_df = pd.read_csv(swimming_csv).fillna("")
 
         print(f"\n{'='*80}")
         print("SWIMMING ABILITY MATCHING")
         print(f"{'='*80}")
-        print(f"Columns: {list(swim_df.columns)}")
+        print(f"Columns found: {list(swim_df.columns)}")
         print(f"Total rows: {len(swim_df)}")
+
+        # ── Locate the student name column ────────────────────────────────────
+        student_col = None
+        for _candidate in ['Student', 'student', 'Student Name', 'StudentName']:
+            if _candidate in swim_df.columns:
+                student_col = _candidate
+                break
+        if student_col is None:
+            for _c in swim_df.columns:
+                if 'student' in _c.lower():
+                    student_col = _c
+                    break
+        if student_col is None:
+            st.error("Swimming CSV: could not find a 'Student' column. "
+                     f"Columns present: {list(swim_df.columns)}")
+            return {}, []
+
+        # ── Locate the swimming ability column ────────────────────────────────
+        ability_col = None
+        for _candidate in ['Swimming Ability', 'swimming ability', 'SwimmingAbility',
+                           'Ability', 'ability', 'Swimming']:
+            if _candidate in swim_df.columns:
+                ability_col = _candidate
+                break
+        if ability_col is None:
+            for _c in swim_df.columns:
+                if 'swim' in _c.lower() or 'ability' in _c.lower():
+                    ability_col = _c
+                    break
+        # Last-resort: use the final column (old format had it unnamed at the end)
+        if ability_col is None:
+            ability_col = swim_df.columns[-1]
+            print(f"Warning: could not find ability column by name — using last column: '{ability_col}'")
+
+        print(f"Using student column: '{student_col}', ability column: '{ability_col}'")
 
         # Deduplicate by email, keep most recent
         swim_df['_time'] = pd.to_datetime(swim_df['Submission Time'], errors='coerce')
@@ -1058,11 +1102,6 @@ def match_dietary_requirements(df_main, dietary_csv, contact_csv=None):
     Matches dietary requirements to students by searching for the student's surname
     within the 'Student' column of the dietary CSV.
 
-    CSV format (7 cols, 6 headers — Email used as implicit index by pandas):
-      Email, First Name, Surname, Student, Submission Time, [Status], Dietary Requirements
-
-    Read with explicit column names to avoid the index-shift problem.
-
     Strategy:
     - Unique surname  → match if surname appears as a whole word in Student field
     - Duplicate surnames → require surname + first/preferred name both present
@@ -1072,24 +1111,62 @@ def match_dietary_requirements(df_main, dietary_csv, contact_csv=None):
         if hasattr(dietary_csv, 'seek'):
             dietary_csv.seek(0)
 
-        col_names = ['Email', 'First Name', 'Surname', 'Student', 'Submission Time', 'Status', 'Dietary Requirements']
-        dietary_df = pd.read_csv(dietary_csv, names=col_names, skiprows=1).fillna("")
-
-        student_col = 'Student'
-        dietary_col = 'Dietary Requirements'
+        # Read with actual headers — don't hardcode column positions.
+        # Paperly forms may gain extra columns (e.g. "User Group Status") between
+        # known fields, which shifts positional indices and silently maps the wrong
+        # data. Reading real headers and finding columns by name is robust to this.
+        dietary_df = pd.read_csv(dietary_csv).fillna("")
 
         print(f"\n{'='*80}")
         print("DIETARY REQUIREMENTS MATCHING")
         print(f"{'='*80}")
-        print(f"Columns: {list(dietary_df.columns)}")
+        print(f"Columns found: {list(dietary_df.columns)}")
         print(f"Total rows: {len(dietary_df)}")
 
-        # Deduplicate by email, keep most recent
-        dietary_df['_time'] = pd.to_datetime(dietary_df['Submission Time'], errors='coerce')
-        has_email = dietary_df[dietary_df['Email'].str.strip() != ""]
-        no_email  = dietary_df[dietary_df['Email'].str.strip() == ""]
-        deduped = has_email.sort_values('_time', ascending=False).drop_duplicates(subset=['Email'], keep='first')
-        dietary_df = pd.concat([deduped, no_email], ignore_index=True)
+        # ── Locate the student name column ────────────────────────────────────
+        student_col = None
+        for _candidate in ['Student', 'student', 'Student Name']:
+            if _candidate in dietary_df.columns:
+                student_col = _candidate
+                break
+        if student_col is None:
+            for _c in dietary_df.columns:
+                if 'student' in _c.lower():
+                    student_col = _c
+                    break
+        if student_col is None:
+            st.error("Dietary CSV: could not find a 'Student' column. "
+                     f"Columns present: {list(dietary_df.columns)}")
+            return {}, []
+
+        # ── Locate the dietary requirements column ────────────────────────────
+        dietary_col = None
+        for _candidate in ['Dietary Requirements', 'dietary requirements',
+                           'DietaryRequirements', 'Dietary', 'dietary']:
+            if _candidate in dietary_df.columns:
+                dietary_col = _candidate
+                break
+        if dietary_col is None:
+            for _c in dietary_df.columns:
+                if 'dietary' in _c.lower() or 'requirement' in _c.lower():
+                    dietary_col = _c
+                    break
+        if dietary_col is None:
+            st.error("Dietary CSV: could not find a 'Dietary Requirements' column. "
+                     f"Columns present: {list(dietary_df.columns)}")
+            return {}, []
+
+        print(f"Using student column: '{student_col}', dietary column: '{dietary_col}'")
+
+        # ── Deduplicate by email, keep most recent ────────────────────────────
+        _email_col = next((c for c in dietary_df.columns if c.lower() == 'email'), None)
+        _time_col  = next((c for c in dietary_df.columns if 'submission time' in c.lower()), None)
+        if _email_col and _time_col:
+            dietary_df['_time'] = pd.to_datetime(dietary_df[_time_col], errors='coerce')
+            has_email = dietary_df[dietary_df[_email_col].str.strip() != ""]
+            no_email  = dietary_df[dietary_df[_email_col].str.strip() == ""]
+            deduped = has_email.sort_values('_time', ascending=False).drop_duplicates(subset=[_email_col], keep='first')
+            dietary_df = pd.concat([deduped, no_email], ignore_index=True)
         print(f"Rows after dedup: {len(dietary_df)}")
 
         # Identify duplicate student surnames
@@ -1362,8 +1439,11 @@ def match_photo_permissions(df_main, photo_perm_csv):
     try:
         df = _read_and_dedup_csv(photo_perm_csv)
 
-        col_first   = df.columns[1]
-        col_surname = df.columns[2]
+        # Find name columns by header rather than position
+        col_first   = next((c for c in df.columns if c.lower() == 'first name'), df.columns[1])
+        col_surname = next((c for c in df.columns if c.lower() == 'surname'), df.columns[2])
+        # Question columns are always the last two in Paperly forms, regardless of
+        # how many metadata columns (Status, User Group Status, etc.) precede them
         q_cols      = [df.columns[-2], df.columns[-1]]
 
         print(f"\n{'='*80}")
