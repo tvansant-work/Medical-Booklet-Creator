@@ -3718,6 +3718,7 @@ if t2 is not None:
 
                     med_l = raw_med.lower()
                     c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phones'][0]['display']})" if parsed_con else ""
+                    c_phone_link = parsed_con[0]['phones'][0]['link'] if parsed_con and parsed_con[0].get('phones') else None
 
                     swim_ability    = final_swimming_map.get(sid, "Data not recorded")
                     swim_color      = get_swimming_display_color(swim_ability)
@@ -3738,7 +3739,8 @@ if t2 is not None:
                     matrix_obj = {
                         "id": sid, "link_id": link_id, "name": f"{sname}, {fname}",
                         "gender": gender,
-                        "contact": c_disp, "asthma": "asthma" in med_l,
+                        "contact": c_disp, "contact_phone_link": c_phone_link,
+                        "asthma": "asthma" in med_l,
                         "allergy": "allergy" in med_l, "anaphylaxis": "anaphylaxis" in med_l,
                         "swimming": swim_ability, "swim_color": swim_color
                     }
