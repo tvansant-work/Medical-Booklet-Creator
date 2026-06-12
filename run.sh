@@ -76,7 +76,8 @@ fetch_and_report "$RAW_BASE/app.py"                        "app.py"             
 fetch_and_report "$RAW_BASE/requirements.txt"              "requirements.txt"              "requirements.txt"
 fetch_and_report "$RAW_BASE/app_icon.png"                  "app_icon.png"                  "app_icon.png"
 fetch_and_report "$RAW_BASE/config.yaml"                   "config.yaml"                   "config.yaml"
-fetch_and_report "$RAW_BASE/profiles.html"                 "profiles.html"                 "profiles.html"
+mkdir -p templates
+fetch_and_report "$RAW_BASE/templates/profiles.html"       "templates/profiles.html"       "templates/profiles.html"
 fetch_and_report "$RAW_BASE/Open Medical Booklet.command"  "Open Medical Booklet.command"  "Open Medical Booklet.command"
 
 # Ensure launcher is always executable after update
