@@ -111,6 +111,7 @@ if [ "$INSTALL_METHOD" = "conda" ]; then
     # This ensures WeasyPrint can find the .dylib files at the right path
     conda create -y -q -n medical-booklet \
         python=3.11 \
+        pip \
         pango \
         cairo \
         glib \
