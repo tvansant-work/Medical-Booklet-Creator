@@ -122,44 +122,26 @@ if [ "$INSTALL_METHOD" = "conda" ]; then
     echo ""
     echo "▶  Installing Python packages..."
 
-    conda run -n medical-booklet pip install --upgrade pip -q
-    conda run -n medical-booklet pip install -r requirements.txt -q
+    # Get the direct path to the environment to avoid conda wrapper bugs
+    ENV_PREFIX="$("$CONDA_EXE" run -n medical-booklet python -c 'import sys; print(sys.prefix)' 2>/dev/null)"
+    
+    # Run pip directly via absolute path
+    "$ENV_PREFIX/bin/pip" install --upgrade pip -q
+    "$ENV_PREFIX/bin/pip" install -r requirements.txt -q
 
-    # ── CRITICAL FIX: Write a conda activation hook ──────────────
-    # This sets DYLD_LIBRARY_PATH to the environment's lib/ folder
-    # every time the environment is activated (including via conda run).
-    # Without this, WeasyPrint cannot find libgobject-2.0-0 at import time.
+    # ── REMOVED: Conda activation hook ──────────────
+    # We intentionally deleted the hook generation code here because 
+    # modifying DYLD_LIBRARY_PATH via Conda hooks crashes Conda's solver
+    # on newer Python versions. We instead write it to a local file below.
 
-    # Find where the environment was installed
-    ENV_LIB="$(conda run -n medical-booklet python -c "import sys, os; print(os.path.join(os.path.dirname(sys.executable), '..', 'lib'))" 2>/dev/null | xargs realpath 2>/dev/null)"
-
-    if [ -n "$ENV_LIB" ] && [ -d "$ENV_LIB" ]; then
-        # Create the activation hooks directory
-        ENV_PREFIX="$(conda run -n medical-booklet python -c "import sys; print(sys.prefix)" 2>/dev/null)"
-        HOOK_DIR="$ENV_PREFIX/etc/conda/activate.d"
-        mkdir -p "$HOOK_DIR"
-
-        cat > "$HOOK_DIR/weasyprint-libs.sh" << HOOKEOF
-#!/bin/bash
-# Set library path so WeasyPrint can find libgobject and friends
-export DYLD_LIBRARY_PATH="${ENV_LIB}:\${DYLD_LIBRARY_PATH}"
-export DYLD_FALLBACK_LIBRARY_PATH="${ENV_LIB}:\${DYLD_FALLBACK_LIBRARY_PATH}"
-HOOKEOF
-
-        echo "   ✅ Library path hook written to environment."
-    else
-        echo "   ⚠️  Could not determine env lib path — writing fallback."
-    fi
-
-    # Also write the lib path to a local file so run.command can set it directly
-    # (conda run doesn't always execute activation hooks)
-    conda run -n medical-booklet python -c \
+    # Write the lib path to a local file so run.command can set it directly
+    "$ENV_PREFIX/bin/python" -c \
         "import sys, os; print(os.path.normpath(os.path.join(sys.prefix, 'lib')))" \
         2>/dev/null > .conda-lib-path
 
     echo "conda" > .install-method
     echo "medical-booklet" > .conda-env-name
-    PYTHON_EXEC="conda run -n medical-booklet python"
+    PYTHON_EXEC="$ENV_PREFIX/bin/python"
 
 else
 
@@ -189,7 +171,7 @@ echo "▶  Verifying WeasyPrint can load..."
 if [ "$INSTALL_METHOD" = "conda" ]; then
     ENV_LIB_PATH="$(cat .conda-lib-path 2>/dev/null)"
     DYLD_LIBRARY_PATH="$ENV_LIB_PATH" DYLD_FALLBACK_LIBRARY_PATH="$ENV_LIB_PATH" \
-        conda run -n medical-booklet python -c "from weasyprint import HTML; print('   ✅ WeasyPrint OK.')" 2>&1 \
+        "$ENV_LIB_PATH/../bin/python" -c "from weasyprint import HTML; print('   ✅ WeasyPrint OK.')" 2>&1 \
         || echo "   ⚠️  WeasyPrint check failed — try running bash setup.sh again."
 else
     .venv/bin/python -c "from weasyprint import HTML; print('   ✅ WeasyPrint OK.')" 2>&1 \
