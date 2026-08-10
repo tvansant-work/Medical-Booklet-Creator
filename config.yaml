@@ -4,6 +4,7 @@ app_settings:
 column_mappings:
   student_id: "Code"
   first_name: "First name"
+  preferred_name: "Preferred name"
   surname: "Surname"
   year: "Year"
   rollgroup: "Rollgroup"

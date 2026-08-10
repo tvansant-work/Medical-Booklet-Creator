@@ -1389,7 +1389,7 @@ def match_camp_medications(df_main, camp_csv):
             if not has_dup:
                 if surname_pat.search(key):
                     matched[student_id] = {
-                        'name': f"{first_name} {surname}",
+                        'name': f"{preferred_name or first_name} {surname}",
                         'medications': data['medications']
                     }
                     used_keys.add(key)
@@ -1400,7 +1400,7 @@ def match_camp_medications(df_main, camp_csv):
                     pref_pat  = re.compile(r'\b' + re.escape(pref_lower)  + r'\b') if pref_lower  else None
                     if (first_pat and first_pat.search(key)) or (pref_pat and pref_pat.search(key)):
                         matched[student_id] = {
-                            'name': f"{first_name} {surname}",
+                            'name': f"{preferred_name or first_name} {surname}",
                             'medications': data['medications']
                         }
                         used_keys.add(key)
@@ -3642,6 +3642,10 @@ if t2 is not None:
                     link_id = re.sub(r'[^a-zA-Z0-9]', '', sid) or f"row{idx}"
 
                     fname, sname = r[COLS['first_name']], r[COLS['surname']]
+                    pref_col = COLS.get('preferred_name', 'Preferred name')
+                    pname = str(r.get(pref_col, '')).strip()
+                    if not pname or pname.lower() == 'nan':
+                        pname = fname  # fall back to first name if no preferred name on file
                     dob = str(r.get('Birth date', r.get('Birth Date', ''))).strip()
                     try: dob = datetime.strptime(dob, '%Y-%m-%d').strftime('%d %b %Y')
                     except: pass
@@ -3726,7 +3730,7 @@ if t2 is not None:
                     photo_perm_val  = final_photo_perm_map.get(sid, None)
 
                     profile_obj = {
-                        "id": sid, "link_id": link_id, "first": fname, "last": sname,
+                        "id": sid, "link_id": link_id, "first": fname, "preferred": pname, "last": sname,
                         "year": year_lvl, "roll": roll, "house": house, "dob": dob, "gender": gender, "tutor": tutor,
                         "swimming": swim_ability, "swim_color": swim_color,
                         "dietary": dietary_req,
@@ -3737,7 +3741,7 @@ if t2 is not None:
                         "y8_camp": st.session_state.get("y8_camp_data", {}).get(sid, None)
                     }
                     matrix_obj = {
-                        "id": sid, "link_id": link_id, "name": f"{sname}, {fname}",
+                        "id": sid, "link_id": link_id, "name": f"{sname}, {pname}",
                         "gender": gender,
                         "contact": c_disp, "contact_phone_link": c_phone_link,
                         "asthma": "asthma" in med_l,
@@ -3746,7 +3750,7 @@ if t2 is not None:
                     }
                     medical_obj = None
                     if parsed_med:
-                        medical_obj = {"name": f"{fname} {sname}", "link_id": link_id, "conditions": parsed_med}
+                        medical_obj = {"name": f"{pname} {sname}", "link_id": link_id, "conditions": parsed_med}
 
                     all_records.append({
                         "profile": profile_obj, "matrix": matrix_obj, "medical": medical_obj,

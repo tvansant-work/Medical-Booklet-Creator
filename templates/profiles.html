@@ -318,7 +318,7 @@
             {% else %}
                 <div class="grid-img" style="display:flex;align-items:center;justify-content:center;color:#ccc;font-size:10px;">NO PHOTO</div>
             {% endif %}
-            <div class="grid-name">{{ s.first }}<br>{{ s.last }}</div>
+            <div class="grid-name">{{ s.preferred }}<br>{{ s.last }}</div>
         </a>
         {% endfor %}
     </div>
@@ -603,7 +603,7 @@
             {% for s in students %}
             {% if s.y8_camp %}
             <tr class="no-break">
-                <td class="name-cell">{{ s.first }} {{ s.last }}</td>
+                <td class="name-cell">{{ s.preferred }} {{ s.last }}</td>
                 {{ score_cell(s.y8_camp['Sea Kayak']) }}
                 {{ score_cell(s.y8_camp['Coasteer']) }}
                 {{ score_cell(s.y8_camp['General Camping Skill'], 'col-divider') }}
@@ -677,7 +677,7 @@
             {% for s in students %}
             {% if s.y8_camp %}
             <tr class="no-break">
-                <td class="name-cell">{{ s.first }} {{ s.last }}</td>
+                <td class="name-cell">{{ s.preferred }} {{ s.last }}</td>
                 {{ score_cell(s.y8_camp['MTB Interest']) }}
                 {{ score_cell(s.y8_camp['Snorkel']) }}
                 {{ score_cell(s.y8_camp['General Camping Skill'], 'col-divider') }}
@@ -710,7 +710,7 @@
         <tbody>
             {% for s in students %}
             <tr class="no-break">
-                <td class="student-name"><a href="#student-{{s.link_id}}" style="font-weight:bold;">{{ s.first }} {{ s.last }}</a></td>
+                <td class="student-name"><a href="#student-{{s.link_id}}" style="font-weight:bold;">{{ s.preferred }} {{ s.last }}</a></td>
                 <td class="dietary-req">
                     {% if s.dietary == "No data given" %}
                         <span class="dietary-no-data">No data given</span>
@@ -744,7 +744,7 @@
             {% else %}
                 <div class="no-perm-img" style="display:flex;align-items:center;justify-content:center;color:#ccc;font-size:9px;">NO PHOTO</div>
             {% endif %}
-            <div class="no-perm-name">{{ s.first }}<br>{{ s.last }}</div>
+            <div class="no-perm-name">{{ s.preferred }}<br>{{ s.last }}</div>
             {% if s.photo_perm == 'No' %}
                 <span class="no-perm-badge no-perm-badge-no">No Permission</span>
             {% else %}
@@ -840,7 +840,7 @@
                 {% endif %}
                 
                 <div class="info">
-                    <h1>{{ s.first }} {{ s.last }}</h1>
+                    <h1>{% if s.preferred and s.preferred != s.first %}{{ s.first }} ({{ s.preferred }}) {{ s.last }}{% else %}{{ s.first }} {{ s.last }}{% endif %}</h1>
                     <div class="meta">
                         <div class="meta-row">
                             {% if options.year %}<span><label>Year:</label>{{ s.year }}</span>{% endif %}
@@ -981,7 +981,7 @@
         {% endif %}
 
         {% endfor %}
-        <div class="footer">Field Kit Generated {{ date }} | Student: {{ s.first }} {{ s.last }}</div>
+        <div class="footer">Field Kit Generated {{ date }} | Student: {{ s.preferred }} {{ s.last }}</div>
     </div>
     
     {% if s.attachments %}
