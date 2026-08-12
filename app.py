@@ -73,6 +73,8 @@ if 'camp_medication_unmatched' not in st.session_state:
     st.session_state.camp_medication_unmatched = []  # [ { 'student_name': str, 'medications': [str], 'index': key } ]
 if 'camp_medication_manual' not in st.session_state:
     st.session_state.camp_medication_manual = {}  # { index_key: student_id }
+if 'camp_permissions_matched' not in st.session_state:
+    st.session_state.camp_permissions_matched = {}  # { student_id: {'antihistamine':T/F/None, 'ibuprofen':..., 'paracetamol':...} }
 if 'camp_days' not in st.session_state:
     st.session_state.camp_days = 3
 import pandas as pd
@@ -1270,11 +1272,23 @@ def parse_camp_medication_csv(camp_csv):
                       'Please describe the medication required (medication 2)',
                       …repeating up to medication 10…,
                       'Is there any more medication…',
-                      'Please describe the remainder of the medication required…'
+                      'Please describe the remainder of the medication required…',
+                      plus three standing OTC-medication permission questions
+                      (Antihistamines / Ibuprofen / Paracetamol), answered
+                      "Yes, I approve" or "No, I do not approve".
 
     Returns a dict:
-        { student_name_lower: { 'display_name': str, 'medications': [str] } }
-    Only includes students who answered "Yes" to needing medication.
+        { student_name_lower: {
+            'display_name': str,
+            'medications': [str],       # empty if student doesn't need camp meds
+            'permissions': {
+                'antihistamine': True/False/None,
+                'ibuprofen':     True/False/None,
+                'paracetamol':   True/False/None,
+            }
+        } }
+    Includes every student who submitted the form (not just those needing
+    camp medication) so the OTC permission answers are captured for everyone.
     Deduplicates by email, keeping the most-recent submission.
     """
     try:
@@ -1293,12 +1307,11 @@ def parse_camp_medication_csv(camp_csv):
                        .drop_duplicates(subset=['Email'], keep='first'))
             df = pd.concat([deduped, no_email], ignore_index=True)
 
-        # Find the "needs medication" column
+        # Find the "needs medication" column (may legitimately be absent on
+        # older exports — we still want to capture the permission questions)
         needs_col = next(
             (c for c in df.columns if 'require any medication' in c.lower()), None
         )
-        if needs_col is None:
-            return {}
 
         # All medication *description* columns (in order they appear)
         desc_cols = [
@@ -1307,33 +1320,54 @@ def parse_camp_medication_csv(camp_csv):
             or 'remainder of the medication' in c.lower()
         ]
 
+        # Standing OTC-medication permission columns
+        antihist_col    = next((c for c in df.columns if 'antihistamine' in c.lower()), None)
+        ibuprofen_col   = next((c for c in df.columns if 'ibuprofen'   in c.lower()), None)
+        paracetamol_col = next((c for c in df.columns if 'paracetamol' in c.lower()), None)
+
+        def _perm_val(row, col):
+            if not col:
+                return None
+            v = str(row.get(col, '')).strip().lower()
+            if v.startswith('yes'):
+                return True
+            if v.startswith('no'):
+                return False
+            return None
+
         result = {}
         for _, row in df.iterrows():
-            if str(row[needs_col]).strip().lower() != 'yes':
-                continue
-
             student_name = str(row.get('Student', '')).strip()
             if not student_name or student_name.lower() == 'nan':
                 continue
 
-            medications = [
-                str(row[c]).strip()
-                for c in desc_cols
-                if str(row[c]).strip() and str(row[c]).strip().lower() != 'nan'
-            ]
+            medications = []
+            if needs_col is not None and str(row[needs_col]).strip().lower() == 'yes':
+                medications = [
+                    str(row[c]).strip()
+                    for c in desc_cols
+                    if str(row[c]).strip() and str(row[c]).strip().lower() != 'nan'
+                ]
 
-            if medications:
-                key = student_name.lower()
-                if key in result:
-                    # Same student submitted twice after dedup — shouldn't normally happen
-                    result[key]['medications'].extend(medications)
-                else:
-                    result[key] = {
-                        'display_name': student_name,
-                        'medications': medications
-                    }
+            permissions = {
+                'antihistamine': _perm_val(row, antihist_col),
+                'ibuprofen':     _perm_val(row, ibuprofen_col),
+                'paracetamol':   _perm_val(row, paracetamol_col),
+            }
 
-        print(f"[Camp Meds] Parsed {len(result)} students needing medication.")
+            key = student_name.lower()
+            if key in result:
+                # Same student submitted twice after dedup — shouldn't normally happen
+                result[key]['medications'].extend(medications)
+            else:
+                result[key] = {
+                    'display_name': student_name,
+                    'medications': medications,
+                    'permissions': permissions,
+                }
+
+        n_needs_meds = sum(1 for v in result.values() if v['medications'])
+        print(f"[Camp Meds] Parsed {len(result)} submissions ({n_needs_meds} needing medication).")
         return result
 
     except Exception as e:
@@ -1342,17 +1376,17 @@ def parse_camp_medication_csv(camp_csv):
         return {}
 
 
-def match_camp_medications(df_main, camp_csv):
+def _match_camp_submissions_to_students(df_main, camp_data):
     """
-    Matches parsed camp medication data to student IDs in df_main.
-    Uses surname-first matching (same strategy as dietary).
+    Shared surname + first/preferred-name matching between camp CSV
+    submissions (keyed by lowercase 'Student' name) and the main student
+    list. Used by both the medication log matcher and the OTC-permission
+    matcher so the two stay consistent.
 
     Returns:
-        matched   = { student_id: { 'name': str, 'medications': [str] } }
-        unmatched = [ { 'student_name': str, 'medications': [str], 'index': key } ]
+        matched   = { student_id: {**camp_data value, 'name': str} }
+        unmatched = [ {**camp_data value, 'index': key} ]
     """
-    camp_data = parse_camp_medication_csv(camp_csv)
-
     if not camp_data:
         return {}, []
 
@@ -1388,10 +1422,7 @@ def match_camp_medications(df_main, camp_csv):
                 continue
             if not has_dup:
                 if surname_pat.search(key):
-                    matched[student_id] = {
-                        'name': f"{preferred_name or first_name} {surname}",
-                        'medications': data['medications']
-                    }
+                    matched[student_id] = dict(data, name=f"{preferred_name or first_name} {surname}")
                     used_keys.add(key)
                     break
             else:
@@ -1399,22 +1430,58 @@ def match_camp_medications(df_main, camp_csv):
                     first_pat = re.compile(r'\b' + re.escape(first_lower) + r'\b') if first_lower else None
                     pref_pat  = re.compile(r'\b' + re.escape(pref_lower)  + r'\b') if pref_lower  else None
                     if (first_pat and first_pat.search(key)) or (pref_pat and pref_pat.search(key)):
-                        matched[student_id] = {
-                            'name': f"{preferred_name or first_name} {surname}",
-                            'medications': data['medications']
-                        }
+                        matched[student_id] = dict(data, name=f"{preferred_name or first_name} {surname}")
                         used_keys.add(key)
                         break
 
-    # Collect unmatched rows for manual assignment
+    unmatched = [dict(v, index=k) for k, v in camp_data.items() if k not in used_keys]
+    return matched, unmatched
+
+
+def match_camp_medications(df_main, camp_csv):
+    """
+    Matches parsed camp medication data to student IDs in df_main.
+    Only carries forward students who actually need camp medication (for
+    the medication administration log page). Uses surname-first matching.
+
+    Returns:
+        matched   = { student_id: { 'name': str, 'medications': [str] } }
+        unmatched = [ { 'student_name': str, 'medications': [str], 'index': key } ]
+    """
+    camp_data = parse_camp_medication_csv(camp_csv)
+    meds_data = {k: v for k, v in camp_data.items() if v['medications']}
+
+    all_matched, all_unmatched = _match_camp_submissions_to_students(df_main, meds_data)
+
+    matched = {
+        sid: {'name': v['name'], 'medications': v['medications']}
+        for sid, v in all_matched.items()
+    }
     unmatched = [
-        {'student_name': v['display_name'], 'medications': v['medications'], 'index': k}
-        for k, v in camp_data.items()
-        if k not in used_keys
+        {'student_name': v['display_name'], 'medications': v['medications'], 'index': v['index']}
+        for v in all_unmatched
     ]
 
     print(f"[Camp Meds] Matched: {len(matched)}  Unmatched: {len(unmatched)}")
     return matched, unmatched
+
+
+def match_camp_permissions(df_main, camp_csv):
+    """
+    Matches the three standing OTC-medication permission answers
+    (Antihistamine / Ibuprofen / Paracetamol) from the camp medication CSV
+    to student IDs — covers every student who submitted the form, regardless
+    of whether they need camp medication. Uses the same surname-first
+    matching strategy as match_camp_medications.
+
+    Returns:
+        { student_id: { 'antihistamine': True/False/None,
+                         'ibuprofen': True/False/None,
+                         'paracetamol': True/False/None } }
+    """
+    camp_data = parse_camp_medication_csv(camp_csv)
+    all_matched, _ = _match_camp_submissions_to_students(df_main, camp_data)
+    return {sid: v['permissions'] for sid, v in all_matched.items()}
 
 
 def match_photo_permissions(df_main, photo_perm_csv):
@@ -2743,7 +2810,7 @@ if t1 is not None:
         st.markdown("""
         <div class="upload-card optional">
           <div class="upload-card-label">💊 Camp Medications CSV</div>
-          <div class="upload-card-desc">From the Paperly camp medication form. Adds a medication administration log page to the booklet — only students with medications are shown. You can upload multiple files — they'll be combined automatically.</div>
+          <div class="upload-card-desc">From the Paperly camp medication form. Adds a medication administration log page to the booklet — only students with medications are shown. Also adds an OTC-medication permissions table (Antihistamine / Ibuprofen / Paracetamol) to each student's profile page. You can upload multiple files — they'll be combined automatically.</div>
         </div>
         """, unsafe_allow_html=True)
         camp_med_csv_files = st.file_uploader("Camp Medications CSV", type="csv", label_visibility="collapsed", key="camp_med_csv_uploader", accept_multiple_files=True)
@@ -2926,6 +2993,7 @@ if t2 is not None:
                     st.session_state.camp_medication_matched   = camp_matched
                     st.session_state.camp_medication_unmatched = camp_unmatched
                     st.session_state.camp_medication_manual    = {}
+                    st.session_state.camp_permissions_matched  = match_camp_permissions(df_final, st.session_state.camp_med_csv)
 
                 st.rerun()
 
@@ -3728,6 +3796,8 @@ if t2 is not None:
                     swim_color      = get_swimming_display_color(swim_ability)
                     dietary_req     = final_dietary_map.get(sid, "No data given")
                     photo_perm_val  = final_photo_perm_map.get(sid, None)
+                    otc_permissions = st.session_state.get('camp_permissions_matched', {}).get(sid) \
+                        if 'camp_med_csv' in st.session_state else None
 
                     profile_obj = {
                         "id": sid, "link_id": link_id, "first": fname, "preferred": pname, "last": sname,
@@ -3735,6 +3805,7 @@ if t2 is not None:
                         "swimming": swim_ability, "swim_color": swim_color,
                         "dietary": dietary_req,
                         "photo_perm": photo_perm_val,
+                        "otc_permissions": otc_permissions,
                         "photo": img_to_base64(final_photo_map.get(sid)),
                         "sections": sections, "attachments": embedded,
                         # Y8 camp survey data — None when not a camp booklet

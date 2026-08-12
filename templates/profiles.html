@@ -140,6 +140,15 @@
     .severe { border-left: 5px solid #d32f2f; background: #ffebee; } .severe .med-badge { background: #d32f2f; color: white; }
     .moderate { border-left: 5px solid #fbc02d; background: #fffde7; } .moderate .med-badge { background: #fbc02d; color: #333; }
     .mild { border-left: 5px solid #2196f3; background: #e3f2fd; } .mild .med-badge { background: #2196f3; color: white; }
+    .otc-perm-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 8pt; }
+    .otc-perm-table caption { text-align: left; font-size: 7.5pt; color: #888; font-style: italic; margin-bottom: 3px; caption-side: top; }
+    .otc-perm-table th { text-align: left; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.02em; color: #666; padding: 3px 6px; border-bottom: 1px solid #ccc; }
+    .otc-perm-table th.otc-perm-col { text-align: center; width: 70px; }
+    .otc-perm-table td { padding: 3px 6px; border-bottom: 1px solid #eee; }
+    .otc-perm-table td.otc-perm-col { text-align: center; }
+    .otc-yes { color: #1a7f6e; font-weight: bold; }
+    .otc-no { color: #c0392b; font-weight: bold; }
+    .otc-na { color: #999; font-size: 7.5pt; }
 
     .contact-grid { display: flex; flex-wrap: wrap; gap: 5px; }
     .contact-card { flex: 0 0 30%; border: 1px solid #ddd; border-radius: 4px; padding: 4px 6px; background: #fdfdfd; font-size: 8pt; }
@@ -828,6 +837,14 @@
     </table>
     <div class="page-break"></div>
 
+    {# ── Reusable macro: tick / cross / N/A cell for OTC permission table ── #}
+    {%- macro otc_cell(val) -%}
+        {%- if val is none %}<span class="otc-na">N/A</span>
+        {%- elif val %}<span class="otc-yes">&#10003;</span>
+        {%- else %}<span class="otc-no">&#10007;</span>
+        {%- endif -%}
+    {%- endmacro -%}
+
     {% for s in students %}
     
     <div class="profile" id="student-{{ s.link_id }}">
@@ -887,6 +904,31 @@
                     <div class="med-desc">{{ cond.description }}</div>
                 </div>
                 {% endfor %}
+            {% endif %}
+            {% if s.otc_permissions %}
+            <table class="otc-perm-table">
+                <caption>Parent permission — non-prescription medication</caption>
+                <thead>
+                    <tr>
+                        <th>Medication</th>
+                        <th class="otc-perm-col">Approved?</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Antihistamine (Cetirizine / Loratadine / Fexofenadine)</td>
+                        <td class="otc-perm-col">{{ otc_cell(s.otc_permissions.antihistamine) }}</td>
+                    </tr>
+                    <tr>
+                        <td>Ibuprofen</td>
+                        <td class="otc-perm-col">{{ otc_cell(s.otc_permissions.ibuprofen) }}</td>
+                    </tr>
+                    <tr>
+                        <td>Paracetamol</td>
+                        <td class="otc-perm-col">{{ otc_cell(s.otc_permissions.paracetamol) }}</td>
+                    </tr>
+                </tbody>
+            </table>
             {% endif %}
         
         {% elif sec.type == 'doctor_grid' %}
