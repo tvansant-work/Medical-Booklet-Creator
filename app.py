@@ -760,8 +760,32 @@ def match_seqta_contacts_app(pdf_records, df_students):
         if len(cands)>1: return None, cands
         return None, None
 
+    def _fix_guardian_ligature(rec, correct_surname):
+        """
+        Guardian names come straight from the PDF text with no roster of
+        their own to verify against, so the ti/tt ligature-glyph fallback
+        above (which corrects the student's own surname) never reaches
+        them. Guardians very often share the student's surname, so once
+        we know the roster-verified correct spelling for this family, use
+        it to fix a guardian name that shows the same corruption pattern.
+        """
+        if not correct_surname:
+            return
+        for g in rec.get('guardians', []):
+            name = g.get('name', '')
+            if not name:
+                continue
+            if correct_surname in re.sub(r'[^a-z]', '', name.lower()):
+                continue  # already correct
+            for pat, repl in ((r'ti', 'tt'), (r'tt', 'ti')):
+                candidate = re.sub(pat, repl, name)
+                if candidate != name and correct_surname in re.sub(r'[^a-z]', '', candidate.lower()):
+                    g['name'] = candidate
+                    break
+
     for rec in pdf_records:
         sur=rec.get('surname','').strip().lower(); first=rec.get('first_name','').strip().lower(); pref=rec.get('preferred','').strip().lower()
+        matched_surname = sur
         sid,cands=_lookup(sur,first,pref)
         if sid is None and cands is None:
             # Ligature-glyph fallback: this font's 'ti'/'tt' ligature glyphs
@@ -773,10 +797,14 @@ def match_seqta_contacts_app(pdf_records, df_students):
                 sur_alt=re.sub(pat,repl,sur); first_alt=re.sub(pat,repl,first); pref_alt=re.sub(pat,repl,pref)
                 if sur_alt==sur: continue
                 sid,cands=_lookup(sur_alt,first_alt,pref_alt)
-                if sid is not None or cands is not None: break
+                if sid is not None or cands is not None:
+                    matched_surname = sur_alt
+                    break
         if cands:
             ambiguous.append((rec,cands)); continue
-        if sid: matched[sid]=rec
+        if sid:
+            _fix_guardian_ligature(rec, matched_surname)
+            matched[sid]=rec
         else: unmatched_list.append(rec)
     return matched, unmatched_list, ambiguous
 
@@ -1957,6 +1985,23 @@ LIGATURE_MAP = {
 _SEEN_PUA_CHARS = set()
 
 
+def _normalize_name_key(s):
+    """
+    Strip spaces and any dash/hyphen-like or apostrophe-like character from
+    a name, regardless of which exact Unicode codepoint was used. PDF
+    exports sometimes render a hyphenated surname using a non-breaking
+    hyphen (U+2011) or similar instead of a plain ASCII "-", which looks
+    identical on screen but would otherwise silently fail a `.replace("-", "")`
+    based exact-match comparison, even though the name displays correctly.
+    """
+    if not isinstance(s, str):
+        return s
+    s = re.sub(r'[\s\u00A0]', '', s)
+    s = re.sub(r'[-\u2010\u2011\u2012\u2013\u2014\u2015\u2212]', '', s)
+    s = re.sub(r"['\u2018\u2019\u02BC\u0060]", '', s)
+    return s
+
+
 def _smart_join(parts):
     """
     Join adjacent PDF word fragments into a readable string.
@@ -2060,9 +2105,7 @@ def extract_photos_geometric(photo_pdf_path, df):
         s_roll  = str(row[COLS['rollgroup']]).strip().lower()
 
         # Clean the key the same way we'll clean PDF text:
-        clean_key = clean_ligatures(
-            s_last.replace(" ", "").replace("-", "").replace("'", "")
-        )
+        clean_key = clean_ligatures(_normalize_name_key(s_last))
 
         if clean_key not in student_map:
             student_map[clean_key] = []
@@ -2144,7 +2187,8 @@ def extract_photos_geometric(photo_pdf_path, df):
                     # Build key
                     raw_text = "".join(w['text'] for w in phrase_objs).lower()
                     text = clean_ligatures(raw_text)
-                    text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "")
+                    text = text.replace(",", "").replace(":", "").replace(".", "")
+                    text = _normalize_name_key(text)
 
                     if text not in student_map:
                         # Ligature-glyph fallback: clean_ligatures() has to
