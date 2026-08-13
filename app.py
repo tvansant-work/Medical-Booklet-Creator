@@ -3816,9 +3816,12 @@ if t2 is not None:
                             return None
                         c = contacts[idx]
                         phone = c.get('phone') or {}
-                        if phone.get('display'):
-                            return {"text": f"{c.get('name','')} ({phone['display']})", "link": phone.get('link')}
-                        return {"text": c.get('name',''), "link": None}
+                        return {
+                            "name": c.get('name', ''),
+                            "relation": c.get('relation', ''),
+                            "phone_display": phone.get('display', ''),
+                            "link": phone.get('link')
+                        }
 
                     swim_ability    = final_swimming_map.get(sid, "Data not recorded")
                     swim_color      = get_swimming_display_color(swim_ability)
