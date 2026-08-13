@@ -771,7 +771,7 @@
     {%- macro contact_cell(c) -%}
         {%- if c and c.name -%}
             {%- if c.link -%}<a href="{{ c.link }}" style="color: inherit; text-decoration: none;">{%- endif -%}
-            {{ c.name }}{% if c.relation %} <span class="c-rel-matrix">({{ c.relation }})</span>{% endif %}{% if c.phone_display %} <span class="phone-no">{{ c.phone_display | replace(' ', '\u00A0') }}</span>{% endif %}
+            {{ c.name }}{% if c.relation %} <span class="c-rel-matrix">({{ c.relation }})</span>{% endif %}{% if c.phone_display %} <span class="phone-no">{{ c.phone_display | replace(' ', '') }}</span>{% endif %}
             {%- if c.link -%}</a>{%- endif -%}
         {%- else -%}
             <span style="color:#aaa;">&mdash;</span>
@@ -781,10 +781,10 @@
     <table class="matrix-table">
         <thead>
             <tr>
-                <th width="22%">Student</th>
+                <th width="18%">Student</th>
                 <th class="gender-col">Gender</th>
-                <th width="33%">Home Contact 1</th>
-                <th width="33%">Home Contact 2</th>
+                <th width="35%">Home Contact 1</th>
+                <th width="35%">Home Contact 2</th>
             </tr>
         </thead>
         <tbody>
