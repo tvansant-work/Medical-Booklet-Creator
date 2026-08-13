@@ -88,16 +88,20 @@
 
     /* TABLES */
     .matrix-table, .summary-table { width: 100%; border-collapse: collapse; font-size: var(--tbl-font); margin-bottom: var(--tbl-margin); }
+    .matrix-table { table-layout: fixed; }
     .matrix-table th, .summary-table th { background: #eee; border: 1px solid #999; padding: var(--tbl-pad); text-align: left; font-size: var(--tbl-hdr-font); }
     .summary-table th { background: #333; color: white; }
     .matrix-table td, .summary-table td { border: 1px solid #ccc; padding: var(--tbl-pad); vertical-align: top; }
     .matrix-table td.center { text-align: center; }
+    .matrix-table th.gender-col, .matrix-table td.gender-col { width: 7ch; max-width: 7ch; white-space: normal; overflow-wrap: break-word; word-break: break-word; text-align: center; }
     
     .matrix-key { font-size: calc(var(--tbl-font) - 0.5pt); color: #555; margin-bottom: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
     .matrix-key-label { font-weight: bold; color: #333; }
     .matrix-key-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
-    .matrix-symbols { display: flex; align-items: center; gap: 3px; margin-top: 2px; }
+    .matrix-symbols { display: inline-flex; align-items: center; gap: 3px; margin-left: 5px; vertical-align: middle; }
     .msym { display: block; vertical-align: middle; }
+    .matrix-table td.contact-cell { white-space: normal; }
+    .matrix-table td.contact-cell .phone-no { white-space: nowrap; }
     .family-alert-box { background: #F1EEF9; border: 1px solid #C9BFE8; border-left: 4px solid #4A3B7A; border-radius: 4px; padding: 8px 10px; margin-bottom: var(--tbl-margin); }
     .family-alert-text { white-space: pre-line; font-size: var(--tbl-font); color: #2b2b2b; line-height: 1.4; }
     .summary-list { margin: 0; padding-left: 14px; font-size: var(--sum-list-font); }
@@ -762,13 +766,26 @@
         <span class="matrix-key-item">{{ sym_swim_cannot }} Cannot swim</span>
         {% endif %}
     </div>
+    {%- macro contact_text(c) -%}
+        {%- if c -%}
+            {%- set toks = c.text.split(' ') -%}
+            {%- if toks|length >= 3 and toks[-1].isdigit() and toks[-2].isdigit() and toks[-3].isdigit() -%}
+                {{ toks[:-3]|join(' ') }} <span class="phone-no">{{ toks[-3:]|join('\u00A0') }}</span>
+            {%- else -%}
+                {{ c.text }}
+            {%- endif -%}
+        {%- else -%}
+            <span style="color:#aaa;">&mdash;</span>
+        {%- endif -%}
+    {%- endmacro -%}
+
     <table class="matrix-table">
         <thead>
             <tr>
-                <th width="30%">Student</th>
-                <th width="6%">Gender</th>
-                <th width="32%">Home Contact 1</th>
-                <th width="32%">Home Contact 2</th>
+                <th width="26%">Student</th>
+                <th class="gender-col">Gender</th>
+                <th width="37%">Home Contact 1</th>
+                <th width="37%">Home Contact 2</th>
             </tr>
         </thead>
         <tbody>
@@ -777,7 +794,7 @@
                 <td>
                     <a href="#student-{{row.link_id}}" style="font-weight:bold;">{{ row.name }}</a>
                     {% if row.family_alert or row.asthma or row.allergy or row.anaphylaxis or (options.photo_perm and row.photo_perm in ('No', 'No Response')) or (options.swimming and (row.swim_weak or row.swim_cannot)) %}
-                    <div class="matrix-symbols">
+                    <span class="matrix-symbols">
                         {% if row.family_alert %}{{ sym_family_alert }}{% endif %}
                         {% if row.asthma %}{{ sym_asthma }}{% endif %}
                         {% if row.allergy %}{{ sym_allergy }}{% endif %}
@@ -790,12 +807,12 @@
                         {% if row.swim_weak %}{{ sym_swim_weak }}{% endif %}
                         {% if row.swim_cannot %}{{ sym_swim_cannot }}{% endif %}
                         {% endif %}
-                    </div>
+                    </span>
                     {% endif %}
                 </td>
-                <td class="center">{{ row.gender }}</td>
-                <td>{% if row.home_contact_1 %}{% if row.home_contact_1.link %}<a href="{{ row.home_contact_1.link }}" style="color: inherit; text-decoration: none;">{{ row.home_contact_1.text }}</a>{% else %}{{ row.home_contact_1.text }}{% endif %}{% else %}<span style="color:#aaa;">&mdash;</span>{% endif %}</td>
-                <td>{% if row.home_contact_2 %}{% if row.home_contact_2.link %}<a href="{{ row.home_contact_2.link }}" style="color: inherit; text-decoration: none;">{{ row.home_contact_2.text }}</a>{% else %}{{ row.home_contact_2.text }}{% endif %}{% else %}<span style="color:#aaa;">&mdash;</span>{% endif %}</td>
+                <td class="gender-col">{{ row.gender }}</td>
+                <td class="contact-cell">{% if row.home_contact_1 %}{% if row.home_contact_1.link %}<a href="{{ row.home_contact_1.link }}" style="color: inherit; text-decoration: none;">{{ contact_text(row.home_contact_1) }}</a>{% else %}{{ contact_text(row.home_contact_1) }}{% endif %}{% else %}{{ contact_text(none) }}{% endif %}</td>
+                <td class="contact-cell">{% if row.home_contact_2 %}{% if row.home_contact_2.link %}<a href="{{ row.home_contact_2.link }}" style="color: inherit; text-decoration: none;">{{ contact_text(row.home_contact_2) }}</a>{% else %}{{ contact_text(row.home_contact_2) }}{% endif %}{% else %}{{ contact_text(none) }}{% endif %}</td>
             </tr>
             {% endfor %}
         </tbody>
