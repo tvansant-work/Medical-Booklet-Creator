@@ -709,6 +709,23 @@ def parse_seqta_contact_pdf_app(pdf_file):
             lines=_sc_contact_lines(words)
             names=_sc_names(page)
             anchors=[(l['y'],l['dob'].strip()) for l in lines if _SC_DOB_RE.match(l['dob'].strip())]
+
+            # ── Carry over contact details split across a page break ──────
+            # If a student's guardian/contact info runs past the bottom of
+            # a page, the tail end appears at the TOP of the next page —
+            # above (or on a page with) no DOB anchor of its own. Without
+            # this, those lines belong to no anchor on this page and are
+            # silently dropped. Re-attach them to the previous page's last
+            # student record before processing this page's own anchors.
+            first_anchor_y = anchors[0][0] if anchors else (page.height + 1)
+            leading_clns = [l['contacts'] for l in lines if l['y'] < first_anchor_y - 2 and l['contacts']]
+            if leading_clns and records:
+                prev = records[-1]
+                prev_clns = prev.get('_raw_contacts', '').split('\n') if prev.get('_raw_contacts') else []
+                merged_clns = prev_clns + leading_clns
+                prev.update(_sc_parse_contacts(merged_clns))
+                prev['_raw_contacts'] = "\n".join(merged_clns)
+
             for idx,(dob_y,dob_val) in enumerate(anchors):
                 end_y=anchors[idx+1][0] if idx+1<len(anchors) else page.height
                 name_raw=''; best=999
