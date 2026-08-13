@@ -93,13 +93,14 @@
     .summary-table th { background: #333; color: white; }
     .matrix-table td, .summary-table td { border: 1px solid #ccc; padding: var(--tbl-pad); vertical-align: top; }
     .matrix-table td.center { text-align: center; }
-    .matrix-table th.gender-col, .matrix-table td.gender-col { width: 7ch; max-width: 7ch; white-space: normal; overflow-wrap: break-word; word-break: break-word; text-align: center; }
+    .matrix-table th.gender-col, .matrix-table td.gender-col { width: 12%; white-space: normal; overflow-wrap: break-word; word-break: break-word; text-align: center; }
     
     .matrix-key { font-size: calc(var(--tbl-font) - 0.5pt); color: #555; margin-bottom: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
     .matrix-key-label { font-weight: bold; color: #333; }
     .matrix-key-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
-    .matrix-symbols { display: inline-flex; align-items: center; gap: 3px; margin-left: 5px; vertical-align: middle; }
-    .msym { display: block; vertical-align: middle; }
+    .student-name-cell { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 4px; max-width: 100%; }
+    .matrix-symbols { display: inline-flex; align-items: center; gap: 2px; vertical-align: middle; flex-shrink: 0; }
+    .msym { display: block; vertical-align: middle; width: 10px; height: 10px; }
     .matrix-table td.contact-cell { white-space: normal; }
     .matrix-table td.contact-cell .phone-no { white-space: nowrap; }
     .matrix-table td.contact-cell .c-rel-matrix { color: #888; font-size: calc(var(--tbl-font) - 0.5pt); }
@@ -780,16 +781,17 @@
     <table class="matrix-table">
         <thead>
             <tr>
-                <th width="26%">Student</th>
+                <th width="28%">Student</th>
                 <th class="gender-col">Gender</th>
-                <th width="37%">Home Contact 1</th>
-                <th width="37%">Home Contact 2</th>
+                <th width="30%">Home Contact 1</th>
+                <th width="30%">Home Contact 2</th>
             </tr>
         </thead>
         <tbody>
             {% for row in matrix %}
             <tr>
                 <td>
+                    <span class="student-name-cell">
                     <a href="#student-{{row.link_id}}" style="font-weight:bold;">{{ row.name }}</a>
                     {% if row.family_alert or row.asthma or row.allergy or row.anaphylaxis or (options.photo_perm and row.photo_perm in ('No', 'No Response')) or (options.swimming and (row.swim_weak or row.swim_cannot)) %}
                     <span class="matrix-symbols">
@@ -807,6 +809,7 @@
                         {% endif %}
                     </span>
                     {% endif %}
+                    </span>
                 </td>
                 <td class="gender-col">{{ row.gender }}</td>
                 <td class="contact-cell">{{ contact_cell(row.home_contact_1) }}</td>
