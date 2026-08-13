@@ -3789,8 +3789,16 @@ if t2 is not None:
                         for f in st.session_state.attachments[sid]: embedded.extend(convert_file_to_images(f))
 
                     med_l = raw_med.lower()
-                    c_disp = f"{parsed_con[0]['name']} ({parsed_con[0]['phones'][0]['display']})" if parsed_con else ""
-                    c_phone_link = parsed_con[0]['phones'][0]['link'] if parsed_con and parsed_con[0].get('phones') else None
+
+                    def _home_contact_display(idx):
+                        contacts = parsed_home.get('contacts') if parsed_home else None
+                        if not contacts or len(contacts) <= idx:
+                            return None
+                        c = contacts[idx]
+                        phone = c.get('phone') or {}
+                        if phone.get('display'):
+                            return {"text": f"{c.get('name','')} ({phone['display']})", "link": phone.get('link')}
+                        return {"text": c.get('name',''), "link": None}
 
                     swim_ability    = final_swimming_map.get(sid, "Data not recorded")
                     swim_color      = get_swimming_display_color(swim_ability)
@@ -3814,9 +3822,13 @@ if t2 is not None:
                     matrix_obj = {
                         "id": sid, "link_id": link_id, "name": f"{sname}, {pname}",
                         "gender": gender,
-                        "contact": c_disp, "contact_phone_link": c_phone_link,
+                        "home_contact_1": _home_contact_display(0),
+                        "home_contact_2": _home_contact_display(1),
                         "asthma": "asthma" in med_l,
                         "allergy": "allergy" in med_l, "anaphylaxis": "anaphylaxis" in med_l,
+                        "photo_perm": photo_perm_val,
+                        "swim_weak": "weak swimmer" in swim_ability.lower(),
+                        "swim_cannot": "cannot swim" in swim_ability.lower(),
                         "swimming": swim_ability, "swim_color": swim_color
                     }
                     medical_obj = None
