@@ -750,24 +750,32 @@ def match_seqta_contacts_app(pdf_records, df_students):
         exact[(sur,first)]=sid; sur_map.setdefault(sur,[]).append(sid)
     matched,unmatched,ambiguous={},{},[]  # use dict for ambiguous clarity
     unmatched_list=[]
+
+    def _lookup(sur_v, first_v, pref_v):
+        """Returns (sid_or_None, ambiguous_candidates_or_None)."""
+        if (sur_v,first_v) in exact: return exact[(sur_v,first_v)], None
+        if pref_v and pref_v!=first_v and (sur_v,pref_v) in exact: return exact[(sur_v,pref_v)], None
+        cands=sur_map.get(sur_v,[])
+        if len(cands)==1: return cands[0], None
+        if len(cands)>1: return None, cands
+        return None, None
+
     for rec in pdf_records:
         sur=rec.get('surname','').strip().lower(); first=rec.get('first_name','').strip().lower(); pref=rec.get('preferred','').strip().lower()
-        sid=None
-        if (sur,first) in exact: sid=exact[(sur,first)]
-        elif pref and pref!=first and (sur,pref) in exact: sid=exact[(sur,pref)]
-        else:
-            cands=sur_map.get(sur,[])
-            if len(cands)==1: sid=cands[0]
-            elif len(cands)>1: ambiguous.append((rec,cands)); continue
-        if sid is None:
-            sur_tt=re.sub(r'ti','tt',sur); first_tt=re.sub(r'ti','tt',first); pref_tt=re.sub(r'ti','tt',pref)
-            if sur_tt!=sur:
-                if (sur_tt,first_tt) in exact: sid=exact[(sur_tt,first_tt)]
-                elif pref_tt and pref_tt!=first_tt and (sur_tt,pref_tt) in exact: sid=exact[(sur_tt,pref_tt)]
-                else:
-                    cands=sur_map.get(sur_tt,[])
-                    if len(cands)==1: sid=cands[0]
-                    elif len(cands)>1: ambiguous.append((rec,cands)); continue
+        sid,cands=_lookup(sur,first,pref)
+        if sid is None and cands is None:
+            # Ligature-glyph fallback: this font's 'ti'/'tt' ligature glyphs
+            # are sometimes decoded as the wrong bigram by our PDF-cleanup
+            # step (e.g. "Jotic" -> "Jottc"). The corruption can go either
+            # direction, so try both re-substitutions against the roster
+            # rather than assuming which way it happened.
+            for pat,repl in ((r'ti','tt'), (r'tt','ti')):
+                sur_alt=re.sub(pat,repl,sur); first_alt=re.sub(pat,repl,first); pref_alt=re.sub(pat,repl,pref)
+                if sur_alt==sur: continue
+                sid,cands=_lookup(sur_alt,first_alt,pref_alt)
+                if sid is not None or cands is not None: break
+        if cands:
+            ambiguous.append((rec,cands)); continue
         if sid: matched[sid]=rec
         else: unmatched_list.append(rec)
     return matched, unmatched_list, ambiguous
@@ -1949,6 +1957,26 @@ LIGATURE_MAP = {
 _SEEN_PUA_CHARS = set()
 
 
+def _smart_join(parts):
+    """
+    Join adjacent PDF word fragments into a readable string.
+    Font kerning around a hyphen glyph occasionally causes pdfplumber to
+    split a hyphenated name into two separate word tokens on the same line
+    (e.g. "Blackway-" and "Cole"). A plain " ".join() then reads
+    "Blackway- Cole". This joins normally, but skips the space when the
+    previous fragment already ends in a hyphen.
+    """
+    out = ""
+    for part in parts:
+        if not out:
+            out = part
+        elif out.endswith("-"):
+            out += part
+        else:
+            out += " " + part
+    return out
+
+
 def clean_ligatures(text):
     """
     Centralised ligature / glyph cleanup.
@@ -2119,8 +2147,22 @@ def extract_photos_geometric(photo_pdf_path, df):
                     text = text.replace(",", "").replace(":", "").replace(".", "").replace("-", "").replace("'", "")
 
                     if text not in student_map:
-                        continue
-                    
+                        # Ligature-glyph fallback: clean_ligatures() has to
+                        # guess when it hits an unmapped PUA glyph, and its
+                        # guess ("tt") is sometimes wrong for glyphs that are
+                        # actually "ti" (e.g. "Jotic" -> "Jottc"). Try both
+                        # re-substitutions against the real roster instead of
+                        # giving up on the first miss.
+                        alt_match = None
+                        for pat, repl in ((r'ti', 'tt'), (r'tt', 'ti')):
+                            alt = re.sub(pat, repl, text)
+                            if alt != text and alt in student_map:
+                                alt_match = alt
+                                break
+                        if alt_match is None:
+                            continue
+                        text = alt_match
+
                     # --- FOUND A SURNAME MATCH ---
                     candidates = student_map[text]
                     
@@ -2139,7 +2181,7 @@ def extract_photos_geometric(photo_pdf_path, df):
                         if w_any['x1'] < col_x0 or w_any['x0'] > col_x1: continue
                         nearby_text_parts.append(clean_ligatures(w_any['text'].lower()))
 
-                    nearby_text = " ".join(nearby_text_parts)
+                    nearby_text = _smart_join(nearby_text_parts)
 
                     # PICK THE STUDENT
                     matched_student_id = None
@@ -2254,7 +2296,7 @@ def extract_photos_geometric(photo_pdf_path, df):
                             if (w['x0'] < img['x1']) and (w['x1'] > img['x0']):
                                 nearby_text.append(clean_ligatures(w['text']))
 
-                    found_text = " ".join(nearby_text) if nearby_text else "No text found immediately below"
+                    found_text = _smart_join(nearby_text) if nearby_text else "No text found immediately below"
                     print(f"    -> Text below orphan: {found_text}")
 
                     unmatched_data.append({
