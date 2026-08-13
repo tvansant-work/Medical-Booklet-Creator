@@ -176,6 +176,23 @@ def parse_tutor(text):
         return match.group(1).strip()
     return ""
 
+def parse_family_alert(text):
+    """
+    Extracts Family Alert details from General Notes.
+    Family Alert is optional (most students won't have one) and its value can
+    span multiple lines, e.g.:
+        Family Alert: Living arrangements are : Friday to Friday, alternate weeks
+    Captures everything after "Family Alert:" up to the next blank-line-separated
+    block (matching how the other General Notes fields are laid out) or the end
+    of the text — not just up to the next colon, since the alert text itself may
+    contain colons.
+    """
+    if not isinstance(text, str): return ""
+    match = re.search(r'Family Alert:\s*(.*?)(?:\n\s*\n|\Z)', text, re.IGNORECASE | re.DOTALL)
+    if match:
+        return match.group(1).strip()
+    return ""
+
 def convert_file_to_images(file_obj):
     """
     Converts a file (PDF or Image) into a list of Base64 strings (one per page).
@@ -3717,13 +3734,13 @@ if t2 is not None:
                     dob = str(r.get('Birth date', r.get('Birth Date', ''))).strip()
                     try: dob = datetime.strptime(dob, '%Y-%m-%d').strftime('%d %b %Y')
                     except: pass
+                    general_notes_text = str(r.get(COLS.get('general_notes', 'General notes'), ''))
                     gender_raw = str(r.get('Gender', r.get('gender', ''))).strip()
                     gender_lower = gender_raw.lower()
                     if gender_lower == 'm': gender = 'Male'
                     elif gender_lower == 'f': gender = 'Female'
                     else:
                         # For anything other than m/f, check General notes for a "Gender:" entry
-                        general_notes_text = str(r.get(COLS.get('general_notes', 'General notes'), ''))
                         gn_match = re.search(r'Gender:\s*\n?(.*?)(?:\n|$)', general_notes_text, re.IGNORECASE)
                         gn_value = gn_match.group(1).strip() if gn_match else ''
                         # The value might be blank on the same line and on the next line instead
@@ -3737,7 +3754,8 @@ if t2 is not None:
                         else:
                             gender = ''
                     house = str(r.get(COLS.get('house', 'House'), '')).strip()
-                    tutor = parse_tutor(str(r.get(COLS.get('general_notes', 'General notes'), '')))
+                    tutor = parse_tutor(general_notes_text)
+                    family_alert = parse_family_alert(general_notes_text)
                     year_lvl = str(r[COLS['year']])
                     roll_raw = str(r[COLS['rollgroup']])
                     roll = expand_rollgroup(roll_raw)  # full name e.g. "7 Mott"
@@ -3766,6 +3784,8 @@ if t2 is not None:
                         if is_med and opt_sec_med:
                             sections.append({"title": sec['section'], "type": "medical_cards", "content": parsed_med})
                         elif is_emg:
+                            if family_alert:
+                                sections.append({"title": "Family Alert", "type": "family_alert", "content": family_alert})
                             if opt_sec_home and (parsed_home['contacts'] or parsed_home['home_address'] or parsed_home['home_phone']):
                                 sections.append({"title": "Home Contacts", "type": "home_contacts", "content": parsed_home})
                             if opt_sec_emerg:
@@ -3826,6 +3846,7 @@ if t2 is not None:
                         "home_contact_2": _home_contact_display(1),
                         "asthma": "asthma" in med_l,
                         "allergy": "allergy" in med_l, "anaphylaxis": "anaphylaxis" in med_l,
+                        "family_alert": bool(family_alert),
                         "photo_perm": photo_perm_val,
                         "swim_weak": "weak swimmer" in swim_ability.lower(),
                         "swim_cannot": "cannot swim" in swim_ability.lower(),

@@ -98,6 +98,8 @@
     .matrix-key-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
     .matrix-symbols { display: flex; align-items: center; gap: 3px; margin-top: 2px; }
     .msym { display: block; vertical-align: middle; }
+    .family-alert-box { background: #F1EEF9; border: 1px solid #C9BFE8; border-left: 4px solid #4A3B7A; border-radius: 4px; padding: 8px 10px; margin-bottom: var(--tbl-margin); }
+    .family-alert-text { white-space: pre-line; font-size: var(--tbl-font); color: #2b2b2b; line-height: 1.4; }
     .summary-list { margin: 0; padding-left: 14px; font-size: var(--sum-list-font); }
     .summary-list li { margin-bottom: var(--sum-li-gap); }
     .sum-sev-severe   { font-size: var(--sum-sev-font); text-transform: uppercase; color: #d32f2f; font-weight: bold; margin-left: 4px; }
@@ -742,10 +744,12 @@
     {% set sym_photo_no = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><path fill="none" stroke="#A32D2D" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" d="M4 9h3l1.2-1.8h7.6L17 9h3a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 4 9z"/><circle cx="12" cy="13.5" r="3" fill="none" stroke="#A32D2D" stroke-width="1.6"/><path fill="none" stroke="#A32D2D" stroke-width="1.8" stroke-linecap="round" d="M3 4l18 17"/></svg>' | safe %}
     {% set sym_swim_weak = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><circle cx="7" cy="7" r="1.6" fill="#854F0B"/><path fill="none" stroke="#854F0B" stroke-width="1.6" stroke-linecap="round" d="M8.5 9l-2 3"/><path fill="none" stroke="#854F0B" stroke-width="2" stroke-linecap="round" d="M2 15c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/><path fill="none" stroke="#854F0B" stroke-width="2" stroke-linecap="round" d="M2 19c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/></svg>' | safe %}
     {% set sym_swim_cannot = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><circle cx="7" cy="7" r="1.6" fill="#A32D2D"/><path fill="none" stroke="#A32D2D" stroke-width="1.6" stroke-linecap="round" d="M8.5 9l-2 3"/><path fill="none" stroke="#A32D2D" stroke-width="2" stroke-linecap="round" d="M2 15c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/><path fill="none" stroke="#A32D2D" stroke-width="2" stroke-linecap="round" d="M2 19c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/><path fill="none" stroke="#A32D2D" stroke-width="1.8" stroke-linecap="round" d="M3 4l18 17"/></svg>' | safe %}
+    {% set sym_family_alert = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><path fill="none" stroke="#4A3B7A" stroke-width="1.7" stroke-linejoin="round" d="M12 2.5 2.5 20h19z"/><rect x="11.1" y="8.5" width="1.8" height="6" fill="#4A3B7A"/><circle cx="12" cy="16.8" r="1.05" fill="#4A3B7A"/></svg>' | safe %}
 
     <h3>Quick Overview</h3>
     <div class="matrix-key">
         <span class="matrix-key-label">Key:</span>
+        <span class="matrix-key-item">{{ sym_family_alert }} Family alert</span>
         <span class="matrix-key-item">{{ sym_asthma }} Asthma</span>
         <span class="matrix-key-item">{{ sym_allergy }} Allergy</span>
         <span class="matrix-key-item">{{ sym_anaphylaxis }} Anaphylaxis</span>
@@ -772,8 +776,9 @@
             <tr>
                 <td>
                     <a href="#student-{{row.link_id}}" style="font-weight:bold;">{{ row.name }}</a>
-                    {% if row.asthma or row.allergy or row.anaphylaxis or (options.photo_perm and row.photo_perm in ('No', 'No Response')) or (options.swimming and (row.swim_weak or row.swim_cannot)) %}
+                    {% if row.family_alert or row.asthma or row.allergy or row.anaphylaxis or (options.photo_perm and row.photo_perm in ('No', 'No Response')) or (options.swimming and (row.swim_weak or row.swim_cannot)) %}
                     <div class="matrix-symbols">
+                        {% if row.family_alert %}{{ sym_family_alert }}{% endif %}
                         {% if row.asthma %}{{ sym_asthma }}{% endif %}
                         {% if row.allergy %}{{ sym_allergy }}{% endif %}
                         {% if row.anaphylaxis %}{{ sym_anaphylaxis }}{% endif %}
@@ -964,6 +969,11 @@
                     </div>
                     {% endfor %}
                 {% endif %}
+            </div>
+
+        {% elif sec.type == 'family_alert' %}
+            <div class="family-alert-box">
+                <div class="family-alert-text">{{ sec.content }}</div>
             </div>
 
         {% elif sec.type == 'home_contacts' %}
