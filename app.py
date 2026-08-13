@@ -694,9 +694,9 @@ def _sc_parse_name(raw):
     pm=re.search(r'\(([^)]+)\)',t); pref=pm.group(1).strip() if pm else ""
     c=re.sub(r'\([^)]*\)','',t).strip()
     if ',' in c:
-        p=c.split(',',1); sur=p[0].strip(); first=p[1].strip().split()[0] if p[1].strip() else ""
+        p=c.split(',',1); sur=p[0].strip(); first=p[1].strip()
     else:
-        tok=c.split(); sur=tok[0] if tok else ""; first=tok[1] if len(tok)>1 else ""
+        tok=c.split(); sur=tok[0] if tok else ""; first=" ".join(tok[1:]) if len(tok)>1 else ""
     r["surname"]=sur; r["first_name"]=first; r["preferred"]=pref if pref else first
     return r
 
@@ -741,6 +741,58 @@ def parse_seqta_contact_pdf_app(pdf_file):
                 records.append({**ni,**ci,"dob":dob_val,"_raw_name":name_raw,"_raw_contacts":"\n".join(clns)})
     return records
 
+def fix_guardian_surname_ligature(rec, correct_surname):
+    """
+    Guardian names come straight from the PDF text with no roster of their
+    own to verify against, so a ligature-glyph misread in a guardian's
+    surname (e.g. "Jottc"/"Ellioti"/"Morett" for "Jotic"/"Elliott"/
+    "Moretti") never gets corrected the way the student's own surname does
+    at match time. Guardians very often share the student's surname, so
+    once we know the roster-confirmed correct spelling for this family,
+    use it to fix the LAST word of a guardian's name if it's clearly a
+    corrupted version of that surname — either a ti/tt bigram swap, or a
+    trailing character dropped/added (both are real ligature-decode
+    failure modes we've seen). This only ever touches the last word, and
+    only when it's a close, structural match — an unrelated guardian
+    surname (e.g. a different-surnamed parent) is left untouched.
+    """
+    if not correct_surname:
+        return
+    correct_surname = re.sub(r'[^a-z]', '', correct_surname.lower())
+    if not correct_surname:
+        return
+    for g in rec.get('guardians', []):
+        name = g.get('name', '')
+        if not name:
+            continue
+        parts = name.split()
+        if not parts:
+            continue
+        last_key = re.sub(r'[^a-z]', '', parts[-1].lower())
+        if not last_key or last_key == correct_surname:
+            continue  # already correct (or nothing to compare)
+
+        fixed_key = None
+        for pat, repl in ((r'ti', 'tt'), (r'tt', 'ti')):
+            candidate = re.sub(pat, repl, last_key)
+            if candidate == correct_surname:
+                fixed_key = correct_surname
+                break
+        if fixed_key is None:
+            # A trailing character (often the tail of an unmapped ligature
+            # glyph) was dropped or duplicated — allow a small length gap
+            # only when one is a prefix of the other, so we don't rewrite a
+            # genuinely different (but similarly-short) surname.
+            if correct_surname.startswith(last_key) and 1 <= len(correct_surname) - len(last_key) <= 2:
+                fixed_key = correct_surname
+            elif last_key.startswith(correct_surname) and 1 <= len(last_key) - len(correct_surname) <= 2:
+                fixed_key = correct_surname
+
+        if fixed_key:
+            parts[-1] = fixed_key.capitalize()
+            g['name'] = " ".join(parts)
+
+
 def match_seqta_contacts_app(pdf_records, df_students):
     id_col=COLS.get('student_id','Code'); fn_col=COLS.get('first_name','First name'); sn_col=COLS.get('surname','Surname')
     exact={}; sur_map={}
@@ -759,29 +811,6 @@ def match_seqta_contacts_app(pdf_records, df_students):
         if len(cands)==1: return cands[0], None
         if len(cands)>1: return None, cands
         return None, None
-
-    def _fix_guardian_ligature(rec, correct_surname):
-        """
-        Guardian names come straight from the PDF text with no roster of
-        their own to verify against, so the ti/tt ligature-glyph fallback
-        above (which corrects the student's own surname) never reaches
-        them. Guardians very often share the student's surname, so once
-        we know the roster-verified correct spelling for this family, use
-        it to fix a guardian name that shows the same corruption pattern.
-        """
-        if not correct_surname:
-            return
-        for g in rec.get('guardians', []):
-            name = g.get('name', '')
-            if not name:
-                continue
-            if correct_surname in re.sub(r'[^a-z]', '', name.lower()):
-                continue  # already correct
-            for pat, repl in ((r'ti', 'tt'), (r'tt', 'ti')):
-                candidate = re.sub(pat, repl, name)
-                if candidate != name and correct_surname in re.sub(r'[^a-z]', '', candidate.lower()):
-                    g['name'] = candidate
-                    break
 
     for rec in pdf_records:
         sur=rec.get('surname','').strip().lower(); first=rec.get('first_name','').strip().lower(); pref=rec.get('preferred','').strip().lower()
@@ -803,7 +832,7 @@ def match_seqta_contacts_app(pdf_records, df_students):
         if cands:
             ambiguous.append((rec,cands)); continue
         if sid:
-            _fix_guardian_ligature(rec, matched_surname)
+            fix_guardian_surname_ligature(rec, matched_surname)
             matched[sid]=rec
         else: unmatched_list.append(rec)
     return matched, unmatched_list, ambiguous
@@ -2143,46 +2172,45 @@ def extract_photos_geometric(photo_pdf_path, df):
             # ----------------------------------------------------------
             # A. NAME MATCHING
             # ----------------------------------------------------------
+            claimed_word_ids = set()
             i = 0
             while i < len(words):
-                words_skipped = 1
+                w0 = words[i]
+                if id(w0) in claimed_word_ids:
+                    i += 1
+                    continue
+
+                # Build a spatially-sorted candidate pool around w0, instead
+                # of assuming words[i:i+length] are already in reading order.
+                # pdfplumber's word order follows the PDF's content-stream
+                # order, which for a caption whose surname wraps onto a
+                # second line isn't always guaranteed to be contiguous with
+                # (or immediately after) the first line in the array. Pooling
+                # by spatial proximity — same narrow column, within ~2 lines
+                # below — and re-sorting by (top, x0) reconstructs the true
+                # reading order regardless of stream order.
+                x0_centre = (w0['x0'] + w0['x1']) / 2
+                pool = [
+                    w for w in words
+                    if id(w) not in claimed_word_ids
+                    and abs(((w['x0'] + w['x1']) / 2) - x0_centre) < 70
+                    and w0['top'] - 2 <= w['top'] <= w0['top'] + 26
+                ]
+                pool.sort(key=lambda w: (w['top'], w['x0']))
+
+                # Only start a phrase attempt from the true first word of its
+                # neighbourhood (avoids re-trying mid-phrase fragments).
+                if not pool or pool[0] is not w0:
+                    i += 1
+                    continue
+
+                matched_this_word = False
 
                 for length in [5, 4, 3, 2, 1]:
-                    if i + length > len(words):
+                    if length > len(pool):
                         continue
 
-                    phrase_objs = words[i : i + length]
-
-                    # SAME-LINE GUARD — with wrapped-surname relaxation.
-                    # Multi-word surnames (e.g. "Jarretto Handerstaay") and
-                    # hyphenated names with a space ("Duskett- McDann") can
-                    # wrap onto the next line in a narrow photo-label column.
-                    # In those cases the words' `top` values differ by one
-                    # full line height (~12 px), exceeding SAME_LINE_TOL=8
-                    # and causing a missed match.
-                    # For multi-word phrases we allow the relaxed tolerance
-                    # when the words stay inside the same narrow column
-                    # (x-centre spread < 70 px) and appear in reading order.
-                    tops = [w['top'] for w in phrase_objs]
-                    vertical_spread = max(tops) - min(tops)
-                    if vertical_spread > SAME_LINE_TOL:
-                        if length > 1:
-                            # Are all words horizontally within the same narrow column?
-                            x_centres = [(w['x0'] + w['x1']) / 2 for w in phrase_objs]
-                            same_col   = (max(x_centres) - min(x_centres)) < 70
-                            # Also allow when the first word ends in '-' (hyphenated wrap)
-                            is_hyphen_wrap = phrase_objs[0]['text'].rstrip().endswith('-')
-                            # Words must appear in descending / non-reversed order (top-to-bottom)
-                            in_order = all(
-                                phrase_objs[j]['top'] <= phrase_objs[j+1]['top'] + 5
-                                for j in range(len(phrase_objs) - 1)
-                            )
-                            if (same_col or is_hyphen_wrap) and in_order and vertical_spread <= 22:
-                                pass  # allow this wrapped multi-word phrase
-                            else:
-                                continue
-                        else:
-                            continue
+                    phrase_objs = pool[:length]
 
                     # Build key
                     raw_text = "".join(w['text'] for w in phrase_objs).lower()
@@ -2220,6 +2248,7 @@ def extract_photos_geometric(photo_pdf_path, df):
                     # SPATIALLY-FILTERED LOOKAHEAD
                     nearby_text_parts = []
                     for w_any in words:
+                        if id(w_any) in claimed_word_ids: continue
                         if w_any['top'] < surname_bottom - 2: continue
                         if w_any['top'] > surname_bottom + LOOKAHEAD_FENCE: continue
                         if w_any['x1'] < col_x0 or w_any['x0'] > col_x1: continue
@@ -2307,10 +2336,12 @@ def extract_photos_geometric(photo_pdf_path, df):
                     else:
                         print(f"    [WARNING] No valid image found above '{text}' (Max Gap: {MAX_V_GAP})")
 
-                    words_skipped = length
+                    for w in phrase_objs:
+                        claimed_word_ids.add(id(w))
+                    matched_this_word = True
                     break 
 
-                i += words_skipped
+                i += 1
 
             # ----------------------------------------------------------
             # B. ORPHAN IMAGES
