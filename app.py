@@ -638,6 +638,25 @@ def _sc(text):
             out.append(ch)
     return unicodedata.normalize('NFC', ''.join(out))
 
+def _sc_finalize_display(text):
+    """
+    Replace any leftover _SC_UNKNOWN_CH marker(s) with a plain-letter
+    guess before text is shown to the user (booklet, contact lists, etc).
+
+    A student's own surname gets a real chance at resolving the marker
+    correctly first, via the wildcard match against the roster in
+    match_seqta_contacts_app. But guardians/contacts have no roster of
+    their own name to verify a guess against, and leaving the raw marker
+    in place means the booklet shows a literal "unknown character" box
+    instead of a name. "tt" is the most common ligature glyph in these
+    school-system PDFs, so it's a reasonable best-effort fallback — not
+    guaranteed correct, but strictly better than a visible placeholder
+    symbol.
+    """
+    if not isinstance(text, str) or _SC_UNKNOWN_CH not in text:
+        return text
+    return text.replace(_SC_UNKNOWN_CH, 'tt')
+
 _SC_STU=165; _SC_DOB=225; _SC_CON=555; _SC_YT=4
 _SC_DOB_RE = re.compile(r'^\d{1,2}/\d{2}/\d{2,4}$')
 _SC_GREL   = re.compile(r'^(Mother|Father|Guardian|Parent|Carer|Step|Uncle|Aunt|Grand|Relation)',re.IGNORECASE)
@@ -685,7 +704,13 @@ def _sc_parse_contacts(lines):
             _sv()
             parts=line.split(None,1); rel=parts[0].title(); rest=parts[1].strip() if len(parts)>1 else ""
             mm=re.search(r'Mobile:\s*([\d\s\+\(\)]+)',rest,re.IGNORECASE)
-            cur={"relationship":rel,"name":rest[:mm.start()].strip() if mm else rest,
+            # Guardian names have no roster of their own to verify a
+            # ligature-glyph guess against (unlike a student's own
+            # surname), so clean up any leftover "unknown character"
+            # marker here rather than let it show as a raw symbol in the
+            # booklet.
+            guardian_name = rest[:mm.start()].strip() if mm else rest
+            cur={"relationship":_sc_finalize_display(rel),"name":_sc_finalize_display(guardian_name),
                  "mobile":mm.group(1).strip() if mm else "","home":"","work":""}
             continue
         if cur is not None and re.search(r'(?:Home:|Work:|Mobile:)',line,re.IGNORECASE):
@@ -703,7 +728,7 @@ def _sc_parse_contacts(lines):
             if mm: r["home_mobile"]=mm.group(1).strip()
             hf=True; continue
         if not af:
-            r["home_address"]=line; af=True
+            r["home_address"]=_sc_finalize_display(line); af=True
     _sv(); return r
 
 def _sc_parse_name(raw):
@@ -795,25 +820,42 @@ def match_seqta_contacts_app(pdf_records, df_students):
         we know the roster-verified correct spelling for this family, use
         it to fix a guardian name that shows the same corruption pattern.
         """
-        if not correct_surname:
-            return
         for g in rec.get('guardians', []):
             name = g.get('name', '')
             if not name:
                 continue
-            if correct_surname in re.sub(r'[^a-z]', '', name.lower()):
-                continue  # already correct
-            for pat, repl in ((r'ti', 'tt'), (r'tt', 'ti')):
-                candidate = re.sub(pat, repl, name)
-                if candidate != name and correct_surname in re.sub(r'[^a-z]', '', candidate.lower()):
-                    g['name'] = candidate
-                    break
+            fixed = name
+            if correct_surname and correct_surname not in re.sub(r'[^a-z]', '', fixed.lower()):
+                for pat, repl in ((r'ti', 'tt'), (r'tt', 'ti')):
+                    candidate = re.sub(pat, repl, fixed)
+                    if candidate != fixed and correct_surname in re.sub(r'[^a-z]', '', candidate.lower()):
+                        fixed = candidate
+                        break
+            # Whether or not a surname-anchored fix was possible, never
+            # leave a raw "unknown glyph" marker visible in the booklet —
+            # the first name can be independently corrupted even when the
+            # surname reads fine (there's no guardian roster to verify a
+            # guess against here, so this is a best-effort fallback; see
+            # _sc_finalize_display).
+            fixed = _sc_finalize_display(fixed)
+            if fixed != name:
+                g['name'] = fixed
 
     for rec in pdf_records:
         sur=rec.get('surname','').strip().lower(); first=rec.get('first_name','').strip().lower(); pref=rec.get('preferred','').strip().lower()
         matched_surname = sur
         sid,cands=_lookup(sur,first,pref)
-        if sid is None and cands is None and _SC_UNKNOWN_CH in sur:
+        # Keep the best "these candidates share a surname" list seen so
+        # far as a fallback for the final ambiguous-review list, in case
+        # none of the correction tiers below manage to fully resolve to
+        # one student. A tier is only allowed to *replace* it with a
+        # fresh ambiguous list if we don't already have one — reaching a
+        # sibling-surname's candidate list here is not itself a failure
+        # to preserve, since a *later* tier correcting the first name
+        # might still narrow it down to a single sid.
+        best_cands = cands
+
+        if sid is None and _SC_UNKNOWN_CH in sur:
             # One or more ligature glyphs in the surname couldn't be
             # identified at all (see _sc()/_SC_UNKNOWN_CH) — e.g.
             # "Moretti" coming through as "More\uFFFDtt" because a
@@ -832,23 +874,45 @@ def match_seqta_contacts_app(pdf_records, df_students):
             hits = [s for s in sur_map if rx.match(s)]
             if len(hits) == 1:
                 sur_fixed = hits[0]
-                sid,cands=_lookup(sur_fixed, first, pref)
-                if sid is not None or cands is not None:
-                    matched_surname = sur_fixed
-        if sid is None and cands is None:
+                t_sid, t_cands = _lookup(sur_fixed, first, pref)
+                if t_sid is not None:
+                    sid, matched_surname = t_sid, sur_fixed
+                elif t_cands is not None and best_cands is None:
+                    best_cands, matched_surname = t_cands, sur_fixed
+
+        if sid is None:
             # Ligature-glyph fallback: this font's 'ti'/'tt' ligature glyphs
             # are sometimes decoded as the wrong bigram by our PDF-cleanup
             # step (e.g. "Jotic" -> "Jottc"). The corruption can go either
             # direction, so try both re-substitutions against the roster
-            # rather than assuming which way it happened.
+            # rather than assuming which way it happened. The corruption
+            # can land in the surname, the first name, or both — trying
+            # only when the SURNAME changes (as this used to do) misses
+            # cases like two siblings sharing a surname where the surname
+            # already reads fine but the first name is what's corrupted
+            # and needed to tell them apart, so every combination that
+            # actually changed something is tried, and this also re-tries
+            # even when the surname alone already matched multiple
+            # siblings (an "ambiguous" result, not just "no match").
             for pat,repl in ((r'ti','tt'), (r'tt','ti')):
                 sur_alt=re.sub(pat,repl,sur); first_alt=re.sub(pat,repl,first); pref_alt=re.sub(pat,repl,pref)
-                if sur_alt==sur: continue
-                sid,cands=_lookup(sur_alt,first_alt,pref_alt)
-                if sid is not None or cands is not None:
-                    matched_surname = sur_alt
+                if sur_alt==sur and first_alt==first and pref_alt==pref:
+                    continue  # this pattern doesn't appear anywhere in the name
+                for s_try, f_try, p_try in (
+                    (sur_alt, first_alt, pref_alt),
+                    (sur_alt, first, pref),
+                    (sur, first_alt, pref_alt),
+                ):
+                    t_sid, t_cands = _lookup(s_try, f_try, p_try)
+                    if t_sid is not None:
+                        sid, matched_surname = t_sid, s_try
+                        break
+                    elif t_cands is not None and best_cands is None:
+                        best_cands, matched_surname = t_cands, s_try
+                if sid is not None:
                     break
-        if sid is None and cands is None and sur and _SC_UNKNOWN_CH not in sur:
+
+        if sid is None and sur and _SC_UNKNOWN_CH not in sur:
             # Last-resort fuzzy fallback: covers ligature corruption the
             # tiers above can't fix (e.g. a genuinely dropped letter with
             # no marker, from characters outside the PUA range). Only
@@ -859,15 +923,27 @@ def match_seqta_contacts_app(pdf_records, df_students):
             if len(close) == 1 and close[0] != sur:
                 sur_fuzzy = close[0]
                 fz_sid, fz_cands = _lookup(sur_fuzzy, first, pref)
-                if fz_sid is not None or fz_cands is not None:
-                    sid, cands = fz_sid, fz_cands
-                    matched_surname = sur_fuzzy
+                if fz_sid is not None:
+                    sid, matched_surname = fz_sid, sur_fuzzy
+                elif fz_cands is not None and best_cands is None:
+                    best_cands, matched_surname = fz_cands, sur_fuzzy
+
+        cands = None if sid is not None else best_cands
+        # Whatever happens next, don't let a raw "unknown glyph" marker
+        # leak into any display of the student's own PDF-extracted name
+        # (e.g. the manual-matching review list) if it wasn't resolved
+        # above.
+        rec['surname'] = _sc_finalize_display(rec.get('surname',''))
+        rec['first_name'] = _sc_finalize_display(rec.get('first_name',''))
+        rec['preferred'] = _sc_finalize_display(rec.get('preferred',''))
         if cands:
             ambiguous.append((rec,cands)); continue
         if sid:
             _fix_guardian_ligature(rec, matched_surname)
             matched[sid]=rec
-        else: unmatched_list.append(rec)
+        else:
+            _fix_guardian_ligature(rec, '')
+            unmatched_list.append(rec)
     return matched, unmatched_list, ambiguous
 
 def home_contacts_from_pdf(pdf_rec):
