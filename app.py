@@ -82,6 +82,7 @@ import zipfile
 import yaml
 import urllib.parse
 import re
+import difflib
 import base64
 import pdfplumber
 import unicodedata
@@ -606,6 +607,11 @@ _SEQTA_LIG = {
     '\u02a6':'tt','\uf001':'fi','\uf002':'fl',
 }
 
+# Placeholder for a ligature glyph we can't confidently identify (see
+# _sc() below). Kept distinct from any real letter so it can be matched
+# against the roster with a wildcard later, instead of guessing wrong.
+_SC_UNKNOWN_CH = '\uFFFD'
+
 def _sc(text):
     if not isinstance(text, str): return text
     for k,v in _SEQTA_LIG.items(): text = text.replace(k,v)
@@ -614,7 +620,20 @@ def _sc(text):
         cp = ord(ch)
         if 0xE000 <= cp <= 0xF8FF:
             d = unicodedata.normalize('NFKD', ch)
-            out.append(d if d != ch else '')
+            if d != ch:
+                out.append(d)
+            else:
+                # Unmapped ligature glyph with no Unicode decomposition.
+                # This used to be dropped entirely (out.append('')), which
+                # permanently deletes a letter with no way to recover it
+                # downstream (e.g. "Moretti" -> "Morett"). Guessing a fixed
+                # replacement like "tt" doesn't reliably fix this either —
+                # right next to a real "t" it just reproduces the same
+                # deletion after de-duplication. Instead we keep a
+                # placeholder marking "one or two unknown letters were
+                # here"; match_seqta_contacts_app resolves it against the
+                # real roster with a wildcard match instead of guessing.
+                out.append(_SC_UNKNOWN_CH)
         else:
             out.append(ch)
     return unicodedata.normalize('NFC', ''.join(out))
@@ -694,10 +713,17 @@ def _sc_parse_name(raw):
     pm=re.search(r'\(([^)]+)\)',t); pref=pm.group(1).strip() if pm else ""
     c=re.sub(r'\([^)]*\)','',t).strip()
     if ',' in c:
-        p=c.split(',',1); sur=p[0].strip(); first=p[1].strip().split()[0] if p[1].strip() else ""
+        # Everything after the comma is the (possibly multi-word) first
+        # name — e.g. "Frank, Ida Mai". Previously only the first token
+        # was kept (".split()[0]"), silently dropping two-word first
+        # names like "Ida Mai" down to just "Ida".
+        p=c.split(',',1); sur=p[0].strip(); first=p[1].strip()
     else:
-        tok=c.split(); sur=tok[0] if tok else ""; first=tok[1] if len(tok)>1 else ""
-    r["surname"]=sur; r["first_name"]=first; r["preferred"]=pref if pref else first
+        tok=c.split(); sur=tok[0] if tok else ""; first=" ".join(tok[1:]) if len(tok)>1 else ""
+    r["surname"]=sur; r["first_name"]=first
+    # Preferred name still defaults to a single token (the colloquial
+    # first name) when there's no explicit "(Preferred)" in the PDF.
+    r["preferred"]=pref if pref else (first.split()[0] if first else "")
     return r
 
 def parse_seqta_contact_pdf_app(pdf_file):
@@ -787,6 +813,28 @@ def match_seqta_contacts_app(pdf_records, df_students):
         sur=rec.get('surname','').strip().lower(); first=rec.get('first_name','').strip().lower(); pref=rec.get('preferred','').strip().lower()
         matched_surname = sur
         sid,cands=_lookup(sur,first,pref)
+        if sid is None and cands is None and _SC_UNKNOWN_CH in sur:
+            # One or more ligature glyphs in the surname couldn't be
+            # identified at all (see _sc()/_SC_UNKNOWN_CH) — e.g.
+            # "Moretti" coming through as "More\uFFFDtt" because a
+            # PDF-embedded glyph for a single "i" wasn't in our map.
+            # Rather than guess a specific letter (which can easily be
+            # wrong, and previously caused permanent, unrecoverable
+            # deletions), resolve it by matching against the real roster:
+            # each unknown glyph stands for 1-2 unknown letters, so build
+            # a wildcard pattern and see if exactly one roster surname
+            # fits it.
+            pattern = ''.join(
+                re.escape(ch) if ch != _SC_UNKNOWN_CH else '.{1,2}'
+                for ch in sur
+            )
+            rx = re.compile('^' + pattern + '$')
+            hits = [s for s in sur_map if rx.match(s)]
+            if len(hits) == 1:
+                sur_fixed = hits[0]
+                sid,cands=_lookup(sur_fixed, first, pref)
+                if sid is not None or cands is not None:
+                    matched_surname = sur_fixed
         if sid is None and cands is None:
             # Ligature-glyph fallback: this font's 'ti'/'tt' ligature glyphs
             # are sometimes decoded as the wrong bigram by our PDF-cleanup
@@ -800,6 +848,20 @@ def match_seqta_contacts_app(pdf_records, df_students):
                 if sid is not None or cands is not None:
                     matched_surname = sur_alt
                     break
+        if sid is None and cands is None and sur and _SC_UNKNOWN_CH not in sur:
+            # Last-resort fuzzy fallback: covers ligature corruption the
+            # tiers above can't fix (e.g. a genuinely dropped letter with
+            # no marker, from characters outside the PUA range). Only
+            # fires when nothing else matched, and only accepts a single,
+            # close, unambiguous roster surname — this can't override or
+            # interfere with any exact/ti-tt/wildcard match above.
+            close = difflib.get_close_matches(sur, sur_map.keys(), n=2, cutoff=0.84)
+            if len(close) == 1 and close[0] != sur:
+                sur_fuzzy = close[0]
+                fz_sid, fz_cands = _lookup(sur_fuzzy, first, pref)
+                if fz_sid is not None or fz_cands is not None:
+                    sid, cands = fz_sid, fz_cands
+                    matched_surname = sur_fuzzy
         if cands:
             ambiguous.append((rec,cands)); continue
         if sid:
@@ -2129,6 +2191,203 @@ def extract_photos_geometric(photo_pdf_path, df):
     COL_PAD          = 30
 
     # ------------------------------------------------------------------
+    # 2b. Helpers (closures over the per-page state set inside the loop
+    #     below — `words`, `page`, `images`, `claimed_images` — resolved
+    #     at call time, so it's safe to define these before that loop).
+    # ------------------------------------------------------------------
+    def _spatial_chain(start_idx, length, exclude=()):
+        """
+        Build a candidate phrase of `length` words anchored at
+        words[start_idx], choosing each subsequent word by ON-PAGE
+        POSITION rather than by its position in the `words` list.
+
+        pdfplumber's default word ordering clusters words into "lines" by
+        top-position across the WHOLE page width, then sorts left-to-right
+        within each line. In a multi-column grid of photo labels, that
+        means the word immediately AFTER "Blackway-" in `words` is often a
+        neighbouring label's word (same row, next column over) rather than
+        "Cole" wrapping onto the line below inside the SAME label — so the
+        plain words[i:i+length] slice used elsewhere silently grabs the
+        wrong words and the surname never matches. This walks the whole
+        word list by geometry instead, to find the real continuation
+        word(s) for a surname that wraps across two lines.
+
+        `exclude` is a set of word-indices already consumed by an earlier
+        successful match on this page (e.g. another student's surname) —
+        they're skipped so one label's words can't be borrowed into
+        another label's phrase.
+
+        Returns a list of word-indices (possibly non-contiguous in
+        `words`), in reading order, or None if no plausible chain of
+        `length` words can be formed.
+        """
+        chain_idx = [start_idx]
+        for _ in range(length - 1):
+            last = words[chain_idx[-1]]
+            last_cx = (last['x0'] + last['x1']) / 2
+            best_idx, best_score = None, None
+            for idx, w in enumerate(words):
+                if idx in chain_idx or idx in exclude:
+                    continue
+                same_line = (abs(w['top'] - last['top']) <= SAME_LINE_TOL
+                             and -2 <= (w['x0'] - last['x1']) <= 15)
+                # Next line down, still inside the same narrow column —
+                # a wrapped continuation of a multi-line surname.
+                w_cx = (w['x0'] + w['x1']) / 2
+                wrapped = (0 < (w['top'] - last['top']) <= 22
+                           and abs(w_cx - last_cx) <= 70)
+                if not (same_line or wrapped):
+                    continue
+                # Same-line candidates are scored by horizontal gap (how
+                # close it sits to the right of the previous word).
+                # Wrapped (next-line) candidates are scored primarily by
+                # vertical gap, then by how well their x-centre lines up
+                # with the previous word's — NOT by x0 vs the previous
+                # word's x1, which are on different lines and not
+                # meaningfully adjacent. Using the same "gap to x1" score
+                # for both cases wrongly favoured a same-line neighbour's
+                # first-name word over the correct next-line surname
+                # continuation.
+                if same_line:
+                    score = abs(w['x0'] - last['x1'])
+                else:
+                    score = (w['top'] - last['top']) * 10 + abs(w_cx - last_cx)
+                if best_score is None or score < best_score:
+                    best_score, best_idx = score, idx
+            if best_idx is None:
+                return None
+            chain_idx.append(best_idx)
+        return chain_idx
+
+    def _try_process_phrase(phrase_objs):
+        """
+        Given a candidate list of word-objects that might form a surname
+        phrase, build the lookup key, resolve ambiguity, and (if a photo
+        is found) claim + save the crop. Returns True if a student was
+        successfully matched and processed, False otherwise (caller
+        should try a different candidate / shorter length).
+        """
+        raw_text = "".join(w['text'] for w in phrase_objs).lower()
+        text = clean_ligatures(raw_text)
+        text = text.replace(",", "").replace(":", "").replace(".", "")
+        text = _normalize_name_key(text)
+
+        if text not in student_map:
+            # Ligature-glyph fallback: clean_ligatures() has to guess when
+            # it hits an unmapped PUA glyph, and its guess ("tt") is
+            # sometimes wrong for glyphs that are actually "ti" (e.g.
+            # "Jotic" -> "Jottc"). Try both re-substitutions against the
+            # real roster instead of giving up on the first miss.
+            alt_match = None
+            for pat, repl in ((r'ti', 'tt'), (r'tt', 'ti')):
+                alt = re.sub(pat, repl, text)
+                if alt != text and alt in student_map:
+                    alt_match = alt
+                    break
+            if alt_match is None:
+                return False
+            text = alt_match
+
+        # --- FOUND A SURNAME MATCH ---
+        candidates = student_map[text]
+
+        # Spatial bounds
+        surname_bottom = max(w['bottom'] for w in phrase_objs)
+        phrase_x0      = min(w['x0']      for w in phrase_objs)
+        phrase_x1      = max(w['x1']      for w in phrase_objs)
+        col_x0 = phrase_x0 - COL_PAD
+        col_x1 = phrase_x1 + COL_PAD
+
+        # SPATIALLY-FILTERED LOOKAHEAD
+        nearby_text_parts = []
+        for w_any in words:
+            if w_any['top'] < surname_bottom - 2: continue
+            if w_any['top'] > surname_bottom + LOOKAHEAD_FENCE: continue
+            if w_any['x1'] < col_x0 or w_any['x0'] > col_x1: continue
+            nearby_text_parts.append(clean_ligatures(w_any['text'].lower()))
+
+        nearby_text = _smart_join(nearby_text_parts)
+
+        # PICK THE STUDENT
+        matched_student_id = None
+        disambiguation_method = "Single Match"
+
+        if len(candidates) == 1:
+            matched_student_id = candidates[0]['id']
+        else:
+            disambiguation_method = "First Name"
+            for cand in candidates:
+                if cand['first'] and cand['first'] in nearby_text:
+                    matched_student_id = cand['id']
+                    break
+
+            if matched_student_id is None:
+                disambiguation_method = "Roll Group"
+                for cand in candidates:
+                    if cand['roll'] and cand['roll'] in nearby_text:
+                        matched_student_id = cand['id']
+                        break
+
+        if matched_student_id is None:
+            print(f"  [DEBUG] AMBIGUOUS: Found surname '{text}' but could not match First/Roll in nearby text: '{nearby_text}'")
+            return False
+
+        print(f"  [DEBUG] MATCHED Name: '{text}' -> ID: {matched_student_id} (via {disambiguation_method})")
+
+        # GEOMETRY: Find photo
+        phrase_top = min(w['top'] for w in phrase_objs)
+        phrase_cx  = (phrase_x0 + phrase_x1) / 2
+
+        best_img_idx = None
+        best_img     = None
+        min_gap      = 9999
+
+        for img_idx, img in enumerate(images):
+            if img_idx in claimed_images: continue # Skip already taken
+
+            img_bot = img['bottom']
+            if img_bot >= phrase_top: continue # Not above
+
+            gap = phrase_top - img_bot
+            if gap > MAX_V_GAP:
+                if gap < MAX_V_GAP + 20:
+                    print(f"    [Img {img_idx}] REJECTED: Too high (Gap {gap:.1f} > {MAX_V_GAP})")
+                continue
+
+            img_cx = (img['x0'] + img['x1']) / 2
+            h_dist = abs(img_cx - phrase_cx)
+            allowed_h_dist = (phrase_x1 - phrase_x0) / 2 + 40
+
+            if h_dist > allowed_h_dist:
+                print(f"    [Img {img_idx}] REJECTED: Off-center (Dist {h_dist:.1f} > {allowed_h_dist:.1f})")
+                continue
+
+            if gap < min_gap:
+                min_gap      = gap
+                best_img     = img
+                best_img_idx = img_idx
+
+        if best_img:
+            print(f"    [Img {best_img_idx}] CLAIMED: Gap={min_gap:.1f}")
+            try:
+                claimed_images.add(best_img_idx)
+                bbox = (best_img['x0'], best_img['top'],
+                        best_img['x1'], best_img['bottom'])
+                crop   = page.within_bbox(bbox)
+                im_obj = crop.to_image(resolution=200).original
+                save_path = os.path.join(
+                    TEMP_DIR, f"{matched_student_id}.jpg"
+                )
+                im_obj.save(save_path)
+                results[matched_student_id] = save_path
+            except Exception as e:
+                print(f"    [ERROR] Saving image: {e}")
+        else:
+            print(f"    [WARNING] No valid image found above '{text}' (Max Gap: {MAX_V_GAP})")
+
+        return True
+
+    # ------------------------------------------------------------------
     # 3. Walk the PDF
     # ------------------------------------------------------------------
     with pdfplumber.open(photo_pdf_path) as pdf:
@@ -2144,7 +2403,19 @@ def extract_photos_geometric(photo_pdf_path, df):
             # A. NAME MATCHING
             # ----------------------------------------------------------
             i = 0
+            # Indices already used in a successful match (contiguous or
+            # spatially-chained). Skipped as future phrase-starts so a
+            # word can't be claimed by two different students, but — 
+            # unlike jumping `i` forward past them — words that were
+            # never actually consumed (e.g. a neighbouring label's word
+            # that a chain search merely looked at and rejected) stay
+            # available to be matched on their own.
+            consumed = set()
             while i < len(words):
+                if i in consumed:
+                    i += 1
+                    continue
+
                 words_skipped = 1
 
                 for length in [5, 4, 3, 2, 1]:
@@ -2165,6 +2436,7 @@ def extract_photos_geometric(photo_pdf_path, df):
                     # (x-centre spread < 70 px) and appear in reading order.
                     tops = [w['top'] for w in phrase_objs]
                     vertical_spread = max(tops) - min(tops)
+                    guard_ok = True
                     if vertical_spread > SAME_LINE_TOL:
                         if length > 1:
                             # Are all words horizontally within the same narrow column?
@@ -2177,138 +2449,47 @@ def extract_photos_geometric(photo_pdf_path, df):
                                 phrase_objs[j]['top'] <= phrase_objs[j+1]['top'] + 5
                                 for j in range(len(phrase_objs) - 1)
                             )
-                            if (same_col or is_hyphen_wrap) and in_order and vertical_spread <= 22:
-                                pass  # allow this wrapped multi-word phrase
-                            else:
-                                continue
+                            guard_ok = (same_col or is_hyphen_wrap) and in_order and vertical_spread <= 22
                         else:
-                            continue
+                            guard_ok = False
 
-                    # Build key
-                    raw_text = "".join(w['text'] for w in phrase_objs).lower()
-                    text = clean_ligatures(raw_text)
-                    text = text.replace(",", "").replace(":", "").replace(".", "")
-                    text = _normalize_name_key(text)
+                    if any((i + k) in consumed for k in range(length)):
+                        # A word later in this window was already claimed
+                        # by an earlier spatially-chained match — don't
+                        # reuse it in a contiguous phrase.
+                        pass
+                    elif guard_ok and _try_process_phrase(phrase_objs):
+                        words_skipped = length
+                        consumed.update(range(i, i + length))
+                        break
 
-                    if text not in student_map:
-                        # Ligature-glyph fallback: clean_ligatures() has to
-                        # guess when it hits an unmapped PUA glyph, and its
-                        # guess ("tt") is sometimes wrong for glyphs that are
-                        # actually "ti" (e.g. "Jotic" -> "Jottc"). Try both
-                        # re-substitutions against the real roster instead of
-                        # giving up on the first miss.
-                        alt_match = None
-                        for pat, repl in ((r'ti', 'tt'), (r'tt', 'ti')):
-                            alt = re.sub(pat, repl, text)
-                            if alt != text and alt in student_map:
-                                alt_match = alt
+                    # SPATIAL WRAP FALLBACK.
+                    # The slice above (words[i:i+length]) assumes the word
+                    # that continues a wrapped surname sits right after it
+                    # in `words`. That's often false in a multi-column photo
+                    # grid: pdfplumber orders words into page-wide "lines"
+                    # by top-position, so the next word in the list is
+                    # frequently a NEIGHBOURING label's word on the same
+                    # row, not this label's second line ("Blackway-" is
+                    # followed in `words` by e.g. the next column's surname,
+                    # not "Cole"). That silently poisons the phrase's key
+                    # and the match is lost. Search by geometry instead of
+                    # list order to find the real continuation word(s).
+                    #
+                    # Only the matched words are marked `consumed` — `i`
+                    # itself only ever advances by 1 here (not by however
+                    # far away the furthest chained word was), so an
+                    # unrelated word that merely sat between them in list
+                    # order (e.g. a neighbouring column's surname) is left
+                    # untouched and still gets its own turn as a phrase
+                    # start.
+                    if length > 1:
+                        idx_chain = _spatial_chain(i, length, exclude=consumed)
+                        if idx_chain:
+                            chain_objs = [words[idx] for idx in idx_chain]
+                            if chain_objs != phrase_objs and _try_process_phrase(chain_objs):
+                                consumed.update(idx_chain)
                                 break
-                        if alt_match is None:
-                            continue
-                        text = alt_match
-
-                    # --- FOUND A SURNAME MATCH ---
-                    candidates = student_map[text]
-                    
-                    # Spatial bounds
-                    surname_bottom = max(w['bottom'] for w in phrase_objs)
-                    phrase_x0      = min(w['x0']      for w in phrase_objs)
-                    phrase_x1      = max(w['x1']      for w in phrase_objs)
-                    col_x0 = phrase_x0 - COL_PAD
-                    col_x1 = phrase_x1 + COL_PAD
-
-                    # SPATIALLY-FILTERED LOOKAHEAD
-                    nearby_text_parts = []
-                    for w_any in words:
-                        if w_any['top'] < surname_bottom - 2: continue
-                        if w_any['top'] > surname_bottom + LOOKAHEAD_FENCE: continue
-                        if w_any['x1'] < col_x0 or w_any['x0'] > col_x1: continue
-                        nearby_text_parts.append(clean_ligatures(w_any['text'].lower()))
-
-                    nearby_text = _smart_join(nearby_text_parts)
-
-                    # PICK THE STUDENT
-                    matched_student_id = None
-                    disambiguation_method = "Single Match"
-
-                    if len(candidates) == 1:
-                        matched_student_id = candidates[0]['id']
-                    else:
-                        disambiguation_method = "First Name"
-                        for cand in candidates:
-                            if cand['first'] and cand['first'] in nearby_text:
-                                matched_student_id = cand['id']
-                                break
-
-                        if matched_student_id is None:
-                            disambiguation_method = "Roll Group"
-                            for cand in candidates:
-                                if cand['roll'] and cand['roll'] in nearby_text:
-                                    matched_student_id = cand['id']
-                                    break
-
-                    if matched_student_id is None:
-                        print(f"  [DEBUG] AMBIGUOUS: Found surname '{text}' but could not match First/Roll in nearby text: '{nearby_text}'")
-                        continue
-                    
-                    print(f"  [DEBUG] MATCHED Name: '{text}' -> ID: {matched_student_id} (via {disambiguation_method})")
-
-                    # GEOMETRY: Find photo
-                    phrase_top = min(w['top'] for w in phrase_objs)
-                    phrase_cx  = (phrase_x0 + phrase_x1) / 2
-
-                    best_img_idx = None
-                    best_img     = None
-                    min_gap      = 9999
-
-                    for img_idx, img in enumerate(images):
-                        if img_idx in claimed_images: continue # Skip already taken
-                        
-                        img_bot = img['bottom']
-                        if img_bot >= phrase_top: continue # Not above
-
-                        gap = phrase_top - img_bot
-                        if gap > MAX_V_GAP: 
-                            # Debug log for rejection if it's kinda close but failed
-                            if gap < MAX_V_GAP + 20:
-                                print(f"    [Img {img_idx}] REJECTED: Too high (Gap {gap:.1f} > {MAX_V_GAP})")
-                            continue
-
-                        img_cx = (img['x0'] + img['x1']) / 2
-                        h_dist = abs(img_cx - phrase_cx)
-                        allowed_h_dist = (phrase_x1 - phrase_x0) / 2 + 40
-                        
-                        if h_dist > allowed_h_dist:
-                            # Debug log for rejection if aligned vertically but off horizontally
-                            print(f"    [Img {img_idx}] REJECTED: Off-center (Dist {h_dist:.1f} > {allowed_h_dist:.1f})")
-                            continue
-
-                        # If we get here, it's a valid candidate
-                        if gap < min_gap:
-                            min_gap      = gap
-                            best_img     = img
-                            best_img_idx = img_idx
-
-                    if best_img:
-                        print(f"    [Img {best_img_idx}] CLAIMED: Gap={min_gap:.1f}")
-                        try:
-                            claimed_images.add(best_img_idx)
-                            bbox = (best_img['x0'], best_img['top'],
-                                    best_img['x1'], best_img['bottom'])
-                            crop   = page.within_bbox(bbox)
-                            im_obj = crop.to_image(resolution=200).original
-                            save_path = os.path.join(
-                                TEMP_DIR, f"{matched_student_id}.jpg"
-                            )
-                            im_obj.save(save_path)
-                            results[matched_student_id] = save_path
-                        except Exception as e:
-                            print(f"    [ERROR] Saving image: {e}")
-                    else:
-                        print(f"    [WARNING] No valid image found above '{text}' (Max Gap: {MAX_V_GAP})")
-
-                    words_skipped = length
-                    break 
 
                 i += words_skipped
 
