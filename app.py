@@ -2408,34 +2408,60 @@ def extract_photos_geometric(photo_pdf_path, df):
             # surname occurrence and let that decide.
             disambiguation_method = "First Name"
             best_cand, best_dist = None, None
+            best_cand_fuzzy, best_dist_fuzzy = None, None
             for cand in candidates:
                 if not cand['first']:
                     continue
                 for w_any, w_text in nearby_words:
-                    if cand['first'] not in w_text:
+                    w_clean = w_text.strip(" ,.:-")
+                    if w_clean != cand['first'] and cand['first'] not in w_text:
                         continue
                     w_cx = (w_any['x0'] + w_any['x1']) / 2
                     dist = (w_any['top'] - surname_bottom) * 10 + abs(w_cx - phrase_cx)
-                    if best_dist is None or dist < best_dist:
-                        best_dist, best_cand = dist, cand
+                    if w_clean == cand['first']:
+                        # Exact whole-word match — most reliable signal.
+                        if best_dist is None or dist < best_dist:
+                            best_dist, best_cand = dist, cand
+                    else:
+                        # Substring-only match — kept as a fallback for
+                        # OCR/ligature quirks, but NOT trusted over an
+                        # exact match. A substring check alone can match
+                        # the wrong sibling when one candidate's first
+                        # name is a prefix of the other's (e.g. "Eli"
+                        # inside "Elijah", "Jack" inside "Jackson"),
+                        # which used to silently swap same-surname pairs'
+                        # photos whenever their names happened to nest
+                        # like that.
+                        if best_dist_fuzzy is None or dist < best_dist_fuzzy:
+                            best_dist_fuzzy, best_cand_fuzzy = dist, cand
             if best_cand:
                 matched_student_id = best_cand['id']
+            elif best_cand_fuzzy:
+                matched_student_id = best_cand_fuzzy['id']
 
             if matched_student_id is None:
                 disambiguation_method = "Roll Group"
                 best_cand, best_dist = None, None
+                best_cand_fuzzy, best_dist_fuzzy = None, None
                 for cand in candidates:
                     if not cand['roll']:
                         continue
                     for w_any, w_text in nearby_words:
-                        if cand['roll'] not in w_text:
+                        w_clean = w_text.strip(" ,.:-")
+                        if w_clean != cand['roll'] and cand['roll'] not in w_text:
                             continue
                         w_cx = (w_any['x0'] + w_any['x1']) / 2
                         dist = (w_any['top'] - surname_bottom) * 10 + abs(w_cx - phrase_cx)
-                        if best_dist is None or dist < best_dist:
-                            best_dist, best_cand = dist, cand
+                        if w_clean == cand['roll']:
+                            if best_dist is None or dist < best_dist:
+                                best_dist, best_cand = dist, cand
+                        else:
+                            if best_dist_fuzzy is None or dist < best_dist_fuzzy:
+                                best_dist_fuzzy, best_cand_fuzzy = dist, cand
                 if best_cand:
                     matched_student_id = best_cand['id']
+                elif best_cand_fuzzy:
+                    matched_student_id = best_cand_fuzzy['id']
 
         if matched_student_id is None:
             print(f"  [DEBUG] AMBIGUOUS: Found surname '{text}' but could not match First/Roll in nearby text: '{nearby_text}'")
