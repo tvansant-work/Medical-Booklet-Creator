@@ -2374,15 +2374,18 @@ def extract_photos_geometric(photo_pdf_path, df):
         col_x0 = phrase_x0 - COL_PAD
         col_x1 = phrase_x1 + COL_PAD
 
-        # SPATIALLY-FILTERED LOOKAHEAD
-        nearby_text_parts = []
+        # SPATIALLY-FILTERED LOOKAHEAD.
+        # Kept as individual (word, cleaned_text) pairs, not just a single
+        # flattened string — see disambiguation below for why.
+        nearby_words = []
         for w_any in words:
             if w_any['top'] < surname_bottom - 2: continue
             if w_any['top'] > surname_bottom + LOOKAHEAD_FENCE: continue
             if w_any['x1'] < col_x0 or w_any['x0'] > col_x1: continue
-            nearby_text_parts.append(clean_ligatures(w_any['text'].lower()))
+            nearby_words.append((w_any, clean_ligatures(w_any['text'].lower())))
 
-        nearby_text = _smart_join(nearby_text_parts)
+        nearby_text = _smart_join(w_text for _, w_text in nearby_words)
+        phrase_cx = (phrase_x0 + phrase_x1) / 2
 
         # PICK THE STUDENT
         matched_student_id = None
@@ -2391,18 +2394,48 @@ def extract_photos_geometric(photo_pdf_path, df):
         if len(candidates) == 1:
             matched_student_id = candidates[0]['id']
         else:
+            # Two (or more) students sharing this surname are usually
+            # sorted right next to each other in the label grid, so the
+            # lookahead zone for ONE student's surname very often also
+            # catches the NEXT student's first name spilling in from the
+            # neighbouring label. A plain "is this substring anywhere in
+            # the lookahead text" check can't tell those apart, and just
+            # always picks whichever candidate happens to come first in
+            # the roster's row order — silently giving one sibling/
+            # namesake's photo to the other, every time, regardless of
+            # which label is actually being looked at. Instead, find the
+            # geometrically CLOSEST matching word to this specific
+            # surname occurrence and let that decide.
             disambiguation_method = "First Name"
+            best_cand, best_dist = None, None
             for cand in candidates:
-                if cand['first'] and cand['first'] in nearby_text:
-                    matched_student_id = cand['id']
-                    break
+                if not cand['first']:
+                    continue
+                for w_any, w_text in nearby_words:
+                    if cand['first'] not in w_text:
+                        continue
+                    w_cx = (w_any['x0'] + w_any['x1']) / 2
+                    dist = (w_any['top'] - surname_bottom) * 10 + abs(w_cx - phrase_cx)
+                    if best_dist is None or dist < best_dist:
+                        best_dist, best_cand = dist, cand
+            if best_cand:
+                matched_student_id = best_cand['id']
 
             if matched_student_id is None:
                 disambiguation_method = "Roll Group"
+                best_cand, best_dist = None, None
                 for cand in candidates:
-                    if cand['roll'] and cand['roll'] in nearby_text:
-                        matched_student_id = cand['id']
-                        break
+                    if not cand['roll']:
+                        continue
+                    for w_any, w_text in nearby_words:
+                        if cand['roll'] not in w_text:
+                            continue
+                        w_cx = (w_any['x0'] + w_any['x1']) / 2
+                        dist = (w_any['top'] - surname_bottom) * 10 + abs(w_cx - phrase_cx)
+                        if best_dist is None or dist < best_dist:
+                            best_dist, best_cand = dist, cand
+                if best_cand:
+                    matched_student_id = best_cand['id']
 
         if matched_student_id is None:
             print(f"  [DEBUG] AMBIGUOUS: Found surname '{text}' but could not match First/Roll in nearby text: '{nearby_text}'")
