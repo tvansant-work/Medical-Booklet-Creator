@@ -26,6 +26,129 @@ if sys.platform == "darwin":
 
 import streamlit as st
 
+# ── App-wide debug log capture ────────────────────────────────────
+# Every print() in this file (photo matching, swimming/dietary/contact
+# matching, error handlers, etc.) already writes helpful diagnostic
+# detail — it just used to only go to whatever terminal happened to
+# be running the server. This tees stdout so that output also
+# accumulates in session_state, where it can be shown in-app and
+# copied into an error report. Installed once per server process
+# (Streamlit re-runs this script on every interaction, but the
+# isinstance check below skips re-wrapping on subsequent runs).
+class _DebugLogTee:
+    def __init__(self, real_stream):
+        self._real = real_stream
+        self.is_debug_log_tee = True
+
+    def write(self, data):
+        self._real.write(data)
+        try:
+            chunks = st.session_state.setdefault("_debug_log_chunks", [])
+            chunks.append(data)
+            # Keep the buffer bounded so a very long session doesn't
+            # grow without limit — trim oldest chunks once we're well
+            # past what anyone would need for a bug report.
+            total_len = sum(len(c) for c in chunks)
+            while total_len > 2_000_000 and len(chunks) > 1:
+                total_len -= len(chunks.pop(0))
+        except Exception:
+            pass
+        return len(data)
+
+    def flush(self):
+        try:
+            self._real.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        return getattr(self._real, "isatty", lambda: False)()
+
+
+if not isinstance(sys.stdout, _DebugLogTee):
+    sys.stdout = _DebugLogTee(sys.stdout)
+if not isinstance(sys.stderr, _DebugLogTee):
+    sys.stderr = _DebugLogTee(sys.stderr)
+
+
+def _gather_environment_info():
+    """A short, copy-pasteable snapshot of the environment, for bug reports."""
+    import platform
+    lines = []
+    lines.append(f"Report generated: {datetime.now().isoformat(timespec='seconds')}")
+    lines.append(f"OS: {platform.platform()}")
+    lines.append(f"Python: {sys.version.split()[0]} ({sys.executable})")
+    try:
+        lines.append(f"Streamlit: {st.__version__}")
+    except Exception:
+        pass
+    try:
+        import pandas as _pd_ver
+        lines.append(f"Pandas: {_pd_ver.__version__}")
+    except Exception:
+        pass
+    for fname, label in [(".install-method", "Install method"), (".conda-env-name", "Conda env")]:
+        try:
+            if os.path.exists(fname):
+                with open(fname) as f:
+                    lines.append(f"{label}: {f.read().strip()}")
+        except Exception:
+            pass
+    return "\n".join(lines)
+
+
+def _build_anonymization_map(df):
+    """
+    Map every real name/preferred-name/surname/student-ID value that
+    appears in the roster to a stable, non-identifying code, e.g.
+    "Cooper" -> "Surname014". The SAME real value always maps to the
+    SAME code within a session, so duplicate-surname or repeated-name
+    patterns (the exact kind of thing needed to diagnose a matching
+    bug) are still visible in the anonymised log — you just can't
+    tell which student it actually is from the text alone.
+    """
+    mapping = {}
+    if df is None or getattr(df, "empty", True):
+        return mapping
+    try:
+        def _values(col_key):
+            col = COLS.get(col_key)
+            if not col or col not in df.columns:
+                return []
+            return sorted(
+                {str(v).strip() for v in df[col].dropna().astype(str) if str(v).strip()},
+                key=str.lower,
+            )
+
+        for col_key, label in [
+            ("surname", "Surname"),
+            ("first_name", "First"),
+            ("preferred_name", "Pref"),
+            ("student_id", "ID"),
+        ]:
+            for i, val in enumerate(_values(col_key), 1):
+                key = val.lower()
+                if key not in mapping:
+                    mapping[key] = f"{label}{i:03d}"
+    except Exception:
+        pass
+    return mapping
+
+
+def _anonymize_text(text, mapping):
+    if not text or not mapping:
+        return text
+    # Longest values first so e.g. a surname that's a prefix of another
+    # value doesn't get partially replaced before the fuller match runs.
+    for real_val in sorted(mapping.keys(), key=len, reverse=True):
+        if not real_val:
+            continue
+        pattern = r"(?<![A-Za-z0-9])" + re.escape(real_val) + r"(?![A-Za-z0-9])"
+        text = re.sub(pattern, mapping[real_val], text, flags=re.IGNORECASE)
+    return text
+
+
+
 # Initialize Session State variables if they don't exist
 if 'extraction_done' not in st.session_state:
     st.session_state.extraction_done = False
@@ -2203,6 +2326,106 @@ def debug_dump_pua_chars():
         print("=== No PUA chars encountered ===")
 
 
+# ---------------------------------------------------------------------------
+# Proactive name pattern risk-scan.
+# Runs against the roster's raw text (surname/first/preferred name) rather
+# than anything extracted from a PDF, looking for the SAME classes of
+# character that have historically caused problems here — the ligature
+# letter-pairs in LIGATURE_MAP (plus the "tt"/"ti" pair, since that's what
+# an unrecognised ligature glyph gets guessed as), non-ASCII characters,
+# and hyphen/apostrophe variants (already special-cased in
+# _normalize_name_key because PDF exports sometimes use a lookalike
+# Unicode character instead of a plain "-" or "'").
+# The point isn't that these patterns ARE bugs — most resolve fine — it's
+# an early warning so a name like "Matti" or "O'Brien-Smith" can be
+# checked deliberately instead of only being noticed after a photo goes
+# missing.
+# ---------------------------------------------------------------------------
+_RISK_LIGATURE_PATTERNS = ["ffi", "ffl", "ff", "fi", "fl", "st", "tti", "tt", "ti"]
+
+
+def _scan_name_pattern_risks(df, mapping):
+    """
+    Returns a list of dicts: {code, field, category, detail}
+    - code: the anonymised code for the value that triggered the flag
+    - field: "Surname" / "First name" / "Preferred name"
+    - category: short risk category label
+    - detail: the specific matched fragment/character (never the full name)
+    """
+    findings = []
+    if df is None or getattr(df, "empty", True) or not mapping:
+        return findings
+
+    field_cols = [
+        ("Surname", COLS.get("surname")),
+        ("First name", COLS.get("first_name")),
+        ("Preferred name", COLS.get("preferred_name")),
+    ]
+
+    seen = set()  # (code, category, detail) — dedupe repeats across rows
+    for field_label, col in field_cols:
+        if not col or col not in df.columns:
+            continue
+        for raw_val in df[col].dropna().astype(str):
+            val = raw_val.strip()
+            if not val:
+                continue
+            code = mapping.get(val.lower())
+            if not code:
+                continue
+            low = val.lower()
+
+            # Classic ligature-prone sequences
+            already_flagged_ligature = False
+            for pat in _RISK_LIGATURE_PATTERNS:
+                if pat in low and not already_flagged_ligature:
+                    key = (code, "Ligature-prone sequence", pat)
+                    if key not in seen:
+                        seen.add(key)
+                        findings.append({
+                            "code": code, "field": field_label,
+                            "category": "Ligature-prone sequence",
+                            "detail": f"contains \"{pat}\"",
+                        })
+                    already_flagged_ligature = True  # one flag per value is enough
+
+            # Non-ASCII characters (accents, macrons, etc.)
+            for ch in val:
+                if ord(ch) > 127:
+                    key = (code, "Non-ASCII character", ch)
+                    if key not in seen:
+                        seen.add(key)
+                        findings.append({
+                            "code": code, "field": field_label,
+                            "category": "Non-ASCII character",
+                            "detail": f"contains \"{ch}\" (U+{ord(ch):04X})",
+                        })
+
+            # Hyphen variants
+            if re.search(r'[-\u2010\u2011\u2012\u2013\u2014\u2015\u2212]', val):
+                key = (code, "Hyphen", "-")
+                if key not in seen:
+                    seen.add(key)
+                    findings.append({
+                        "code": code, "field": field_label,
+                        "category": "Hyphen",
+                        "detail": "contains a hyphen/dash",
+                    })
+
+            # Apostrophe variants
+            if re.search(r"['\u2018\u2019\u02BC\u0060]", val):
+                key = (code, "Apostrophe", "'")
+                if key not in seen:
+                    seen.add(key)
+                    findings.append({
+                        "code": code, "field": field_label,
+                        "category": "Apostrophe",
+                        "detail": "contains an apostrophe",
+                    })
+
+    return findings
+
+
 def debug_find_ligature_char(photo_pdf_path, target_fragment="ma"):
     """
     Scans every word in the PDF and prints repr() for any word
@@ -3035,6 +3258,9 @@ with _h2:
         if st.button("ℹ  About", use_container_width=True):
             st.session_state._show_about = not st.session_state.get("_show_about", False)
             st.rerun()
+        if st.button("🛠  Debug Log", use_container_width=True):
+            st.session_state._show_debug_log = not st.session_state.get("_show_debug_log", False)
+            st.rerun()
 
 if st.session_state.get("_show_close"):
     st.info("**To close the app:** Switch to the Terminal window that opened when you launched, press **Ctrl + C**, then close Terminal.", icon="⏹")
@@ -3060,6 +3286,110 @@ if st.session_state.get("_show_about"):
         if st.button("✕  Close"):
             st.session_state._show_about = False
             st.rerun()
+
+if st.session_state.get("_show_debug_log"):
+    with st.container(border=True):
+        st.markdown("**🛠 Debug Log**")
+        st.caption(
+            "A running record of everything the app has done this session — "
+            "photo matching, swimming/dietary/contact matching, and any errors. "
+            "If something looks wrong, filter for a surname below, or use "
+            "**Prepare full report** and send it to the developer."
+        )
+
+        _anon_map = _build_anonymization_map(st.session_state.get("df_final"))
+        _anon_on = st.checkbox(
+            "🔒  Anonymise student names/IDs (recommended before sharing)",
+            value=True,
+            key="_debug_log_anon",
+            disabled=not _anon_map,
+            help=(
+                "Replaces every real surname, first name, preferred name, and "
+                "student ID with a code (e.g. \"Surname014\"). The same real "
+                "value always gets the same code, so patterns like two "
+                "students colliding on one photo are still visible — the "
+                "actual names just aren't."
+                if _anon_map else
+                "No roster is loaded yet this session, so there's nothing to anonymise."
+            ),
+        )
+
+        if _anon_map:
+            _risk_findings = _scan_name_pattern_risks(st.session_state.get("df_final"), _anon_map)
+            with st.expander(f"⚠️  Name pattern risk-scan — {len(_risk_findings)} flagged (anonymised)"):
+                st.caption(
+                    "A proactive scan of the roster for the kinds of character "
+                    "patterns that have caused problems here before — ligature "
+                    "sequences a PDF font can render as a single odd glyph "
+                    "(like the \"tt\"/\"ti\" in \"Matti\"), accented characters, "
+                    "hyphens, and apostrophes. Nothing here is necessarily a bug "
+                    "— it's a shortlist of names worth double-checking if a "
+                    "photo or record ever goes missing. Codes only, no real names."
+                )
+                if not _risk_findings:
+                    st.write("No flagged patterns in the current roster.")
+                else:
+                    from collections import defaultdict
+                    _by_cat = defaultdict(list)
+                    for f in _risk_findings:
+                        _by_cat[f["category"]].append(f)
+                    for cat, items in _by_cat.items():
+                        st.markdown(f"**{cat}** ({len(items)})")
+                        for it in items:
+                            st.markdown(f"- `{it['code']}` ({it['field']}) — {it['detail']}")
+
+        _dbg_filter = st.text_input(
+            "Filter (e.g. a surname — if anonymising, use the code shown in the log)",
+            key="_debug_log_filter",
+        )
+
+        _full_log = "".join(st.session_state.get("_debug_log_chunks", []))
+        _display_log = _anonymize_text(_full_log, _anon_map) if _anon_on else _full_log
+        _shown_log = _display_log
+        if _dbg_filter.strip():
+            _shown_log = "\n".join(
+                line for line in _display_log.splitlines()
+                if _dbg_filter.strip().lower() in line.lower()
+            ) or "(no lines matched that filter)"
+
+        st.text_area("Log output", _shown_log, height=320, key="_debug_log_display")
+
+        _dcol1, _dcol2, _dcol3 = st.columns([1, 1, 1])
+        with _dcol1:
+            if st.button("📋  Prepare full report", use_container_width=True):
+                st.session_state._debug_report_ready = True
+                st.rerun()
+        with _dcol2:
+            if st.button("🗑  Clear log", use_container_width=True):
+                st.session_state._debug_log_chunks = []
+                st.rerun()
+        with _dcol3:
+            if st.button("✕  Close", use_container_width=True):
+                st.session_state._show_debug_log = False
+                st.session_state._debug_report_ready = False
+                st.rerun()
+
+        if st.session_state.get("_debug_report_ready"):
+            _report_log = _anonymize_text(_full_log, _anon_map) if _anon_on else _full_log
+            _risk_section = ""
+            if _anon_map:
+                _risk_items = _scan_name_pattern_risks(st.session_state.get("df_final"), _anon_map)
+                _risk_lines = [f"- {it['code']} ({it['field']}) — {it['category']}: {it['detail']}" for it in _risk_items]
+                _risk_section = (
+                    "\n\n" + ("-" * 60) + "\nNAME PATTERN RISK-SCAN (anonymised)\n" + ("-" * 60) + "\n"
+                    + ("\n".join(_risk_lines) if _risk_lines else "(none flagged)")
+                )
+            _report = (
+                _gather_environment_info()
+                + _risk_section
+                + "\n\n" + ("-" * 60) + "\nLOG\n" + ("-" * 60) + "\n" + _report_log
+            )
+            if _anon_on and _anon_map:
+                st.success("Names and student IDs below have been replaced with codes.", icon="🔒")
+            st.text_area(
+                "Full report — select all (Cmd/Ctrl+A) and copy, then paste into an email or message",
+                _report, height=400, key="_debug_report_display",
+            )
 
 
 SEQTA_URL = "https://teach.friends.tas.edu.au/studentSummary/reporting"
