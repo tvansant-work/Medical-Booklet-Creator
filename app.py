@@ -2445,9 +2445,11 @@ def debug_find_ligature_char(photo_pdf_path, target_fragment="ma"):
 def extract_photos_geometric(photo_pdf_path, df):
     results = {}
     unmatched_data = []
+    collisions = []
+    match_method_counts = {}
 
     if not photo_pdf_path:
-        return results, unmatched_data
+        return results, unmatched_data, collisions
 
     print(f"\n--- Starting Geometric Extraction: {os.path.basename(photo_pdf_path)} ---")
 
@@ -2480,6 +2482,20 @@ def extract_photos_geometric(photo_pdf_path, df):
         total_students += 1
 
     print(f"[DEBUG] Loaded {total_students} students ({len(student_map)} unique surnames).")
+
+    # Collision-risk census — print this BEFORE anything can go wrong, so
+    # a scan always tells you up front which surname groups have 2+
+    # students and are therefore the ones disambiguation logic actually
+    # has to work for. If a photo ever goes to the wrong student, it will
+    # always be one of the surnames listed here.
+    _dupe_groups = {k: v for k, v in student_map.items() if len(v) > 1}
+    if _dupe_groups:
+        print(f"[DEBUG] {len(_dupe_groups)} surname group(s) have 2+ students (disambiguation required):")
+        for key, group in _dupe_groups.items():
+            ids = ", ".join(g["id"] for g in group)
+            print(f"  [DEBUG]   Surname key '{key}': {len(group)} students (IDs: {ids})")
+    else:
+        print("[DEBUG] No duplicate surname groups this roster — every surname is unique.")
 
     # ------------------------------------------------------------------
     # 2. Constants
@@ -2688,9 +2704,11 @@ def extract_photos_geometric(photo_pdf_path, df):
 
         if matched_student_id is None:
             print(f"  [DEBUG] AMBIGUOUS: Found surname '{text}' but could not match First/Roll in nearby text: '{nearby_text}'")
+            match_method_counts["AMBIGUOUS (unmatched)"] = match_method_counts.get("AMBIGUOUS (unmatched)", 0) + 1
             return False
 
         print(f"  [DEBUG] MATCHED Name: '{text}' -> ID: {matched_student_id} (via {disambiguation_method})")
+        match_method_counts[disambiguation_method] = match_method_counts.get(disambiguation_method, 0) + 1
 
         # GEOMETRY: Find photo
         phrase_top = min(w['top'] for w in phrase_objs)
@@ -2737,6 +2755,20 @@ def extract_photos_geometric(photo_pdf_path, df):
                     TEMP_DIR, f"{matched_student_id}.jpg"
                 )
                 im_obj.save(save_path)
+                if matched_student_id in results:
+                    # This ID already has a photo from earlier in this same
+                    # scan — writing again would silently overwrite it and
+                    # is very likely the "duplicate surname" failure mode:
+                    # two different labels in the PDF both resolved to the
+                    # same student. Surface it instead of losing it quietly.
+                    print(f"    [COLLISION] Student ID {matched_student_id} already has a photo "
+                          f"assigned this scan — about to be overwritten. Likely a duplicate-surname mismatch.")
+                    collisions.append({
+                        "id": matched_student_id,
+                        "previous_path": results[matched_student_id],
+                        "new_path": save_path,
+                        "matched_via": disambiguation_method,
+                    })
                 results[matched_student_id] = save_path
             except Exception as e:
                 print(f"    [ERROR] Saving image: {e}")
@@ -2891,8 +2923,24 @@ def extract_photos_geometric(photo_pdf_path, df):
                     print(f"    [ERROR] Processing orphan {img_idx}: {e}")
 
     debug_dump_pua_chars()
+
+    print(f"\n=== Scan summary ===")
+    print(f"  Photos extracted: {len(results)}")
+    print(f"  Orphan images (no name match found nearby): {len(unmatched_data)}")
+    if match_method_counts:
+        print(f"  Matches by method:")
+        for method, count in sorted(match_method_counts.items(), key=lambda kv: -kv[1]):
+            print(f"    {method}: {count}")
+    if collisions:
+        print(f"  [COLLISION] {len(collisions)} student ID(s) were matched more than once this scan "
+              f"(a later match overwrote an earlier photo for the same ID):")
+        for c in collisions:
+            print(f"    ID {c['id']} — overwritten via '{c['matched_via']}' match")
+    else:
+        print(f"  No ID collisions detected.")
+
     print(f"--- Finished. Extracted {len(results)} photos. ---\n")
-    return results, unmatched_data
+    return results, unmatched_data, collisions
 
 
 def image_to_a4_pdf(upload):
@@ -3730,9 +3778,10 @@ if t2 is not None:
 
         if st.button("Scan & Match Photos", type="primary"):
             with st.spinner("Scanning PDF and matching photos to students…"):
-                results, unmatched = extract_photos_geometric(photo_pdf_path, df_final)
+                results, unmatched, collisions = extract_photos_geometric(photo_pdf_path, df_final)
                 st.session_state.auto_matches = results
                 st.session_state.unmatched_data = unmatched
+                st.session_state.photo_collisions = collisions
                 st.session_state.extraction_done = True
                 st.session_state.manual_selections = {}
                 st.session_state.detected_plans = detect_medical_plans(df_final)
@@ -3777,6 +3826,44 @@ if t2 is not None:
                 student_options.append(label)
                 name_to_id_map[label] = sid
                 id_to_name_map[sid] = f"{row[COLS['first_name']]} {row[COLS['surname']]}"
+
+            # ── Collision warning ───────────────────────────────────────────
+            # If the same student ID got a photo assigned to it more than
+            # once in this scan, an earlier (possibly correct) photo was
+            # silently overwritten — usually because two same-surname
+            # students' labels both resolved to one of them. Surface this
+            # directly rather than relying on someone noticing a photo is
+            # wrong or missing after the fact.
+            _collisions = st.session_state.get("photo_collisions", [])
+            if _collisions:
+                with st.expander(
+                    f"🚨  {len(_collisions)} possible photo mix-up(s) detected — review before generating booklets",
+                    expanded=True,
+                ):
+                    st.warning(
+                        "The same student was matched to a photo more than once during this scan. "
+                        "That usually means two different photo labels in the PDF (often a shared "
+                        "surname) both resolved to this one student — so their real photo may be "
+                        "wrong, and whoever they were confused with may have no photo at all. "
+                        "Please check both students below."
+                    )
+                    for c in _collisions:
+                        _name = id_to_name_map.get(c["id"], c["id"])
+                        st.markdown(f"**{_name}** (ID: {c['id']}) — matched via *{c['matched_via']}*")
+                        _ccol1, _ccol2 = st.columns(2)
+                        with _ccol1:
+                            st.caption("Photo that was overwritten:")
+                            if os.path.exists(c["previous_path"]):
+                                st.image(c["previous_path"], width=120)
+                        with _ccol2:
+                            st.caption("Photo currently assigned:")
+                            if os.path.exists(c["new_path"]):
+                                st.image(c["new_path"], width=120)
+                        st.caption(
+                            "Also check whether another student with the same surname is now "
+                            "missing a photo in the list below, and reassign manually if needed."
+                        )
+                        st.divider()
 
             # Photos
             n_auto = len(st.session_state.auto_matches)
