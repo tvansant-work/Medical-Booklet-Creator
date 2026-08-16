@@ -2646,8 +2646,8 @@ def extract_photos_geometric(photo_pdf_path, df):
             # geometrically CLOSEST matching word to this specific
             # surname occurrence and let that decide.
             disambiguation_method = "First Name"
-            best_cand, best_dist = None, None
-            best_cand_fuzzy, best_dist_fuzzy = None, None
+            best_cand, best_dist, tied = None, None, False
+            best_cand_fuzzy, best_dist_fuzzy, tied_fuzzy = None, None, False
             for cand in candidates:
                 if not cand['first']:
                     continue
@@ -2659,8 +2659,16 @@ def extract_photos_geometric(photo_pdf_path, df):
                     dist = (w_any['top'] - surname_bottom) * 10 + abs(w_cx - phrase_cx)
                     if w_clean == cand['first']:
                         # Exact whole-word match — most reliable signal.
-                        if best_dist is None or dist < best_dist:
-                            best_dist, best_cand = dist, cand
+                        if best_dist is None or dist < best_dist - 0.01:
+                            best_dist, best_cand, tied = dist, cand, False
+                        elif abs(dist - best_dist) <= 0.01 and cand is not best_cand:
+                            # A second candidate matched an equally-close word
+                            # — a genuine tie, not just noise. Guessing here
+                            # would silently give one student's photo to the
+                            # other, so this occurrence is left unmatched
+                            # instead (it'll show up for manual review)
+                            # rather than picking arbitrarily.
+                            tied = True
                     else:
                         # Substring-only match — kept as a fallback for
                         # OCR/ligature quirks, but NOT trusted over an
@@ -2671,17 +2679,19 @@ def extract_photos_geometric(photo_pdf_path, df):
                         # which used to silently swap same-surname pairs'
                         # photos whenever their names happened to nest
                         # like that.
-                        if best_dist_fuzzy is None or dist < best_dist_fuzzy:
-                            best_dist_fuzzy, best_cand_fuzzy = dist, cand
-            if best_cand:
+                        if best_dist_fuzzy is None or dist < best_dist_fuzzy - 0.01:
+                            best_dist_fuzzy, best_cand_fuzzy, tied_fuzzy = dist, cand, False
+                        elif abs(dist - best_dist_fuzzy) <= 0.01 and cand is not best_cand_fuzzy:
+                            tied_fuzzy = True
+            if best_cand and not tied:
                 matched_student_id = best_cand['id']
-            elif best_cand_fuzzy:
+            elif best_cand_fuzzy and not tied_fuzzy:
                 matched_student_id = best_cand_fuzzy['id']
 
             if matched_student_id is None:
                 disambiguation_method = "Roll Group"
-                best_cand, best_dist = None, None
-                best_cand_fuzzy, best_dist_fuzzy = None, None
+                best_cand, best_dist, tied = None, None, False
+                best_cand_fuzzy, best_dist_fuzzy, tied_fuzzy = None, None, False
                 for cand in candidates:
                     if not cand['roll']:
                         continue
@@ -2692,14 +2702,26 @@ def extract_photos_geometric(photo_pdf_path, df):
                         w_cx = (w_any['x0'] + w_any['x1']) / 2
                         dist = (w_any['top'] - surname_bottom) * 10 + abs(w_cx - phrase_cx)
                         if w_clean == cand['roll']:
-                            if best_dist is None or dist < best_dist:
-                                best_dist, best_cand = dist, cand
+                            if best_dist is None or dist < best_dist - 0.01:
+                                best_dist, best_cand, tied = dist, cand, False
+                            elif abs(dist - best_dist) <= 0.01 and cand is not best_cand:
+                                # Roll group / homeroom is often shared by
+                                # more than one student with the same
+                                # surname (e.g. siblings or namesakes in the
+                                # same class), so this tie is expected
+                                # sometimes, not a bug — there's no more
+                                # information in the PDF to break it safely,
+                                # so this occurrence goes to manual review
+                                # instead of guessing which student it is.
+                                tied = True
                         else:
-                            if best_dist_fuzzy is None or dist < best_dist_fuzzy:
-                                best_dist_fuzzy, best_cand_fuzzy = dist, cand
-                if best_cand:
+                            if best_dist_fuzzy is None or dist < best_dist_fuzzy - 0.01:
+                                best_dist_fuzzy, best_cand_fuzzy, tied_fuzzy = dist, cand, False
+                            elif abs(dist - best_dist_fuzzy) <= 0.01 and cand is not best_cand_fuzzy:
+                                tied_fuzzy = True
+                if best_cand and not tied:
                     matched_student_id = best_cand['id']
-                elif best_cand_fuzzy:
+                elif best_cand_fuzzy and not tied_fuzzy:
                     matched_student_id = best_cand_fuzzy['id']
 
         if matched_student_id is None:
