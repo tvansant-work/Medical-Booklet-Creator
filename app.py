@@ -48,9 +48,15 @@ class _DebugLogTee:
             # Keep the buffer bounded so a very long session doesn't
             # grow without limit — trim oldest chunks once we're well
             # past what anyone would need for a bug report.
-            total_len = sum(len(c) for c in chunks)
+            # (Running total kept in session_state rather than recomputed
+            # via sum(len(c) for c in chunks) on every write — with the
+            # extraction code printing per-image debug lines, that sum()
+            # was rescanning the whole buffer on every single write call,
+            # i.e. O(n) work per write instead of O(1).)
+            total_len = st.session_state.get("_debug_log_total_len", 0) + len(data)
             while total_len > 2_000_000 and len(chunks) > 1:
                 total_len -= len(chunks.pop(0))
+            st.session_state["_debug_log_total_len"] = total_len
         except Exception:
             pass
         return len(data)
@@ -2008,19 +2014,6 @@ def match_photo_permissions(df_main, photo_perm_csv):
         print(traceback.format_exc())
         return {}
 
-def get_swimming_display_color(ability):
-    """
-    Returns color class based on swimming ability.
-    """
-    if not ability or ability.lower() == 'data not recorded':
-        return 'swim-none'
-    elif 'cannot swim' in ability.lower():
-        return 'swim-cannot'
-    elif 'weak swimmer' in ability.lower():
-        return 'swim-weak'
-    else:
-        return 'swim-ok'
-
 def parse_learning_support(text):
     if not isinstance(text, str) or not text.strip(): return {} 
 
@@ -2424,22 +2417,6 @@ def _scan_name_pattern_risks(df, mapping):
                     })
 
     return findings
-
-
-def debug_find_ligature_char(photo_pdf_path, target_fragment="ma"):
-    """
-    Scans every word in the PDF and prints repr() for any word
-    containing target_fragment (case-insensitive, after lowering).
-    Example: target_fragment="ma" will catch "Matthew", "Mattie", etc.
-    """
-    import pdfplumber
-    with pdfplumber.open(photo_pdf_path) as pdf:
-        for page_num, page in enumerate(pdf.pages):
-            for w in page.extract_words():
-                if target_fragment in w['text'].lower():
-                    print(f"  Page {page_num+1} | raw repr: {repr(w['text'])} | "
-                          f"codepoints: {[f'U+{ord(c):04X}' for c in w['text']]}")
-# ---------------------------------------------------------------------------
 
 
 def extract_photos_geometric(photo_pdf_path, df):
@@ -3432,6 +3409,7 @@ if st.session_state.get("_show_debug_log"):
         with _dcol2:
             if st.button("🗑  Clear log", use_container_width=True):
                 st.session_state._debug_log_chunks = []
+                st.session_state._debug_log_total_len = 0
                 st.rerun()
         with _dcol3:
             if st.button("✕  Close", use_container_width=True):
