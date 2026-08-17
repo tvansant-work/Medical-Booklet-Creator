@@ -100,7 +100,7 @@
     .matrix-key-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
     .student-name-cell { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 4px; max-width: 100%; }
     .matrix-symbols { display: inline-flex; align-items: center; gap: 2px; vertical-align: middle; flex-shrink: 0; }
-    .msym { display: block; vertical-align: middle; width: 1.15em; height: 1.15em; }
+    .msym { display: block; vertical-align: middle; width: 1.09em; height: 1.09em; }
     .matrix-table td.contact-cell { white-space: normal; }
     .matrix-table td.contact-cell .phone-no { white-space: nowrap; }
     .matrix-table td.contact-cell .c-rel-matrix { color: #888; font-size: calc(var(--tbl-font) - 0.5pt); }
@@ -222,6 +222,14 @@
     }
 
     /* CAMP MEDICATION LOG */
+    .camp-med-filing-header {
+        font-size: 8pt;
+        color: #666;
+        margin-bottom: 5px;
+        padding-bottom: 4px;
+        border-bottom: 1px solid #ccc;
+        letter-spacing: 0.02em;
+    }
     .camp-med-heading {
         font-size: 13pt;
         font-weight: bold;
@@ -348,6 +356,7 @@
        for late arrivals or additional medications on the day.
     ════════════════════════════════════════════════════════════════ #}
     {% if camp_medications %}
+    <div class="camp-med-filing-header">{{ title }} &nbsp;&middot;&nbsp; Generated {{ date }}</div>
     <div class="camp-med-heading">💊 Camp Medication Administration Log</div>
     <div class="camp-med-preamble">
         This log must be completed each time a student receives medication.
