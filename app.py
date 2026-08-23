@@ -181,9 +181,13 @@ if 'photo_permissions_map' not in st.session_state:
 if 'active_feature' not in st.session_state:
     st.session_state.active_feature = None  # None | 'booklet' | 'group'
 if 'group_results' not in st.session_state:
-    st.session_state.group_results = None  # Stores last group creator results
+    st.session_state.group_results = None  # Stores last ID Matcher results
 if 'group_email_input' not in st.session_state:
     st.session_state.group_email_input = ""
+if 'idm_input_type' not in st.session_state:
+    st.session_state.idm_input_type = "Email"  # What the user is pasting in: Name | Student ID | Email
+if 'idm_output_type' not in st.session_state:
+    st.session_state.idm_output_type = "Student ID"  # What the user wants back: Name | Student ID | Email
 if 'seqta_contact_matched' not in st.session_state:
     st.session_state.seqta_contact_matched = {}
 if 'seqta_contact_unmatched' not in st.session_state:
@@ -3147,7 +3151,7 @@ st.markdown("""<style>
 
 
 
-  /* ── Group creator output box ── */
+  /* ── ID Matcher output box ── */
   .group-output-wrap {
     background: #f0faf8;
     border: 2px solid #a8ddd6;
@@ -3457,7 +3461,7 @@ if _active_feature == "booklet":
     t0, t1, t2 = _tabs
     t3 = None
 elif _active_feature == "group":
-    _tab_labels = ["  🏠 Home  ", "  👥 Group Creator  "]
+    _tab_labels = ["  🏠 Home  ", "  🔗 ID Matcher  "]
     _tabs = st.tabs(_tab_labels)
     t0, t3 = _tabs
     t1 = t2 = None
@@ -3496,7 +3500,7 @@ if st.session_state.get("_go_setup"):
     st.session_state._go_setup = False
     _inject_tab_click(1)
 
-# Auto-switch: → Group Creator tab (index 1 when feature=group)
+# Auto-switch: → ID Matcher tab (index 1 when feature=group)
 if st.session_state.get("_go_group"):
     st.session_state._go_group = False
     _inject_tab_click(1)
@@ -3533,7 +3537,7 @@ with t0:
         # Hidden marker lets CSS target and style this column's button as a card
         st.markdown('<span id="fc-group-marker" style="display:none"></span>', unsafe_allow_html=True)
         if st.button(
-            "👥\n\n**SEQTA Group Creator**\n\nPaste student email addresses and the app looks up their student codes — ready to paste into SEQTA to create a custom group.",
+            "🔗\n\n**SEQTA ID Matcher**\n\nPaste a list of names, student IDs or emails and get back the matching value from the student list — ready to paste into SEQTA.",
             use_container_width=True,
             key="home_group_btn"
         ):
@@ -4905,44 +4909,85 @@ if t2 is not None:
                                            file_name="Medical_Booklet.pdf", mime="application/pdf")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — SEQTA GROUP CREATOR
+# TAB 3 — SEQTA ID MATCHER
 # ═══════════════════════════════════════════════════════════════════════════════
 if t3 is not None:
  with t3:
 
-    st.markdown('<div class="section-head">SEQTA Group Creator</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-head">SEQTA ID Matcher</div>', unsafe_allow_html=True)
     st.markdown(
-        'Paste student email addresses and (optionally) upload a Student List CSV. '
-        'The app will match emails to student ID codes — ready to paste into <a href="https://teach.friends.tas.edu.au/students/classes" target="_blank" style="color:#1a7f6e;font-weight:600">SEQTA</a>.',
+        'Choose what you\'re pasting in and what you want back, paste your list, and '
+        '(optionally) upload a Student List CSV. The app will match them up — ready to paste into '
+        '<a href="https://teach.friends.tas.edu.au/students/classes" target="_blank" style="color:#1a7f6e;font-weight:600">SEQTA</a>.',
         unsafe_allow_html=True
     )
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── Step 1: Email addresses ───────────────────────────────────────────────
-    st.markdown('''<div class="section-head">Step 1 — Student Email Addresses</div>''', unsafe_allow_html=True)
-    st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">Paste emails separated by spaces, commas, semicolons, newlines or any mix.</p>', unsafe_allow_html=True)
+    # ── Step 1: Input / Output type ───────────────────────────────────────────
+    st.markdown('''<div class="section-head">Step 1 — What are you matching?</div>''', unsafe_allow_html=True)
+    _idm_options = ["Name", "Student ID", "Email"]
+
+    idm_col1, idm_col2 = st.columns(2)
+    with idm_col1:
+        idm_input_type = st.selectbox(
+            "I have a list of",
+            options=_idm_options,
+            index=_idm_options.index(st.session_state.idm_input_type),
+            key="idm_input_type_box"
+        )
+    with idm_col2:
+        idm_output_type = st.selectbox(
+            "I want to get back",
+            options=_idm_options,
+            index=_idm_options.index(st.session_state.idm_output_type),
+            key="idm_output_type_box"
+        )
+    st.session_state.idm_input_type = idm_input_type
+    st.session_state.idm_output_type = idm_output_type
+
+    # Only Email → Student ID is wired up so far; flag anything else clearly.
+    _idm_supported = (idm_input_type == "Email" and idm_output_type == "Student ID")
+    if idm_input_type == idm_output_type:
+        st.warning("Input and output are the same — pick two different fields.")
+    elif not _idm_supported:
+        st.info(
+            f"🚧 {idm_input_type} → {idm_output_type} matching is coming soon. "
+            "For now, only Email → Student ID is active — the layout is ready and the "
+            "other combinations will be wired up next."
+        )
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── Step 2: Paste the list ────────────────────────────────────────────────
+    st.markdown(f'''<div class="section-head">Step 2 — Paste your list of {idm_input_type.lower()}s</div>''', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">Paste values separated by spaces, commas, semicolons, newlines or any mix.</p>', unsafe_allow_html=True)
+    _idm_placeholders = {
+        "Name": "e.g.\nJohn Smith, Kate Jones\nTom Brown",
+        "Student ID": "e.g.\n1023, 1044\n1078",
+        "Email": "e.g.\nsmith.j@school.edu.au, jones.k@school.edu.au\nbrown.t@school.edu.au",
+    }
     email_input = st.text_area(
-        "Email addresses",
+        "Values to match",
         value=st.session_state.group_email_input,
         height=160,
-        placeholder="e.g.\nsmith.j@school.edu.au, jones.k@school.edu.au\nbrown.t@school.edu.au",
+        placeholder=_idm_placeholders.get(idm_input_type, ""),
         label_visibility="collapsed",
         key="gc_email_box"
     )
     st.session_state.group_email_input = email_input
 
-    # ── Step 2: Student List CSV ──────────────────────────────────────────────
-    st.markdown('''<div class="section-head">Step 2 — Student List CSV</div>''', unsafe_allow_html=True)
+    # ── Step 3: Student List CSV ──────────────────────────────────────────────
+    st.markdown('''<div class="section-head">Step 3 — Student List CSV</div>''', unsafe_allow_html=True)
     st.markdown(f"""
     <div class="upload-card">
       <div class="upload-card-label">Student List CSV</div>
-      <div class="upload-card-desc">The same student list CSV from Seqta — used to look up student codes from email addresses.
+      <div class="upload-card-desc">The same student list CSV from Seqta — used to look up the matching value.
       <br><a class="seqta-link" href="{SEQTA_URL}" target="_blank" style="margin-top:6px;display:inline-flex">↗ Open in Seqta</a></div>
     </div>
     """, unsafe_allow_html=True)
     gc_csv = st.file_uploader(
-        "Student List CSV for group creator",
+        "Student List CSV for ID matcher",
         type="csv",
         label_visibility="collapsed",
         key="gc_csv_uploader"
@@ -4952,10 +4997,10 @@ if t3 is not None:
         st.caption("💡 A student list is already loaded from the Booklet Creator — it will be used automatically if no file is uploaded here.")
 
     st.markdown("<br>", unsafe_allow_html=True)
-    run_gc = st.button("🔍  Find Student Codes", type="primary", key="gc_run_btn")
+    run_gc = st.button("🔍  Find Matches", type="primary", key="gc_run_btn", disabled=not _idm_supported)
 
     if run_gc:
-        # ── Parse emails ─────────────────────────────────────────────────────
+        # ── Parse emails (Email → Student ID is the only wired-up combo so far) ─
         raw_text = st.session_state.group_email_input.strip()
         if not raw_text:
             st.warning("Please paste at least one email address.")
