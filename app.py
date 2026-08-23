@@ -3537,7 +3537,7 @@ with t0:
         # Hidden marker lets CSS target and style this column's button as a card
         st.markdown('<span id="fc-group-marker" style="display:none"></span>', unsafe_allow_html=True)
         if st.button(
-            "🔗\n\n**SEQTA ID Matcher**\n\nPaste a list of names, student IDs or emails and get back the matching value from the student list — ready to paste into SEQTA.",
+            "🔗\n\n**ID Matcher**\n\nPaste a list of names, student IDs or emails and get back the matching value from the student list — ready to paste into SEQTA.",
             use_container_width=True,
             key="home_group_btn"
         ):
@@ -4909,12 +4909,12 @@ if t2 is not None:
                                            file_name="Medical_Booklet.pdf", mime="application/pdf")
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# TAB 3 — SEQTA ID MATCHER
+# TAB 3 — ID MATCHER
 # ═══════════════════════════════════════════════════════════════════════════════
 if t3 is not None:
  with t3:
 
-    st.markdown('<div class="section-head">SEQTA ID Matcher</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-head">ID Matcher</div>', unsafe_allow_html=True)
     st.markdown(
         'Choose what you\'re pasting in and what you want back, paste your list, and '
         '(optionally) upload a Student List CSV. The app will match them up — ready to paste into '
@@ -4946,14 +4946,16 @@ if t3 is not None:
     st.session_state.idm_input_type = idm_input_type
     st.session_state.idm_output_type = idm_output_type
 
-    # Only Email → Student ID is wired up so far; flag anything else clearly.
-    _idm_supported = (idm_input_type == "Email" and idm_output_type == "Student ID")
+    # Only Email ↔ Student ID is wired up so far; flag anything else clearly.
+    _idm_supported = (
+        {idm_input_type, idm_output_type} == {"Email", "Student ID"}
+    )
     if idm_input_type == idm_output_type:
         st.warning("Input and output are the same — pick two different fields.")
     elif not _idm_supported:
         st.info(
             f"🚧 {idm_input_type} → {idm_output_type} matching is coming soon. "
-            "For now, only Email → Student ID is active — the layout is ready and the "
+            "For now, Email ↔ Student ID (either direction) is active — the layout is ready and the "
             "other combinations will be wired up next."
         )
 
@@ -4961,7 +4963,7 @@ if t3 is not None:
 
     # ── Step 2: Paste the list ────────────────────────────────────────────────
     st.markdown(f'''<div class="section-head">Step 2 — Paste your list of {idm_input_type.lower()}s</div>''', unsafe_allow_html=True)
-    st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">Paste values separated by spaces, commas, semicolons, newlines or any mix.</p>', unsafe_allow_html=True)
+    st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">Paste values separated by spaces, commas, semicolons, colons, pipes or newlines — any mix.</p>', unsafe_allow_html=True)
     _idm_placeholders = {
         "Name": "e.g.\nJohn Smith, Kate Jones\nTom Brown",
         "Student ID": "e.g.\n1023, 1044\n1078",
@@ -5000,20 +5002,25 @@ if t3 is not None:
     run_gc = st.button("🔍  Find Matches", type="primary", key="gc_run_btn", disabled=not _idm_supported)
 
     if run_gc:
-        # ── Parse emails (Email → Student ID is the only wired-up combo so far) ─
+        # ── Parse the pasted list ────────────────────────────────────────────
+        # Split on any combination of: commas, semicolons, colons, pipes, spaces,
+        # newlines or tabs — any mix of these, in any amount, counts as a separator.
         raw_text = st.session_state.group_email_input.strip()
         if not raw_text:
-            st.warning("Please paste at least one email address.")
+            st.warning(f"Please paste at least one {idm_input_type.lower()}.")
         else:
-            # Split on any combination of: commas, semicolons, pipes, spaces, newlines, tabs
-            emails_raw = re.split(r'[\s,;|\t]+', raw_text)
-            # Keep only strings that look like email addresses
-            email_pattern = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
-            emails = [e.strip().lower() for e in emails_raw if email_pattern.match(e.strip())]
-            invalid = [e.strip() for e in emails_raw if e.strip() and not email_pattern.match(e.strip())]
+            tokens_raw = [t for t in re.split(r'[\s,;:|]+', raw_text) if t]
 
-            if not emails:
-                st.error("No valid email addresses found. Please check your input.")
+            if idm_input_type == "Email":
+                email_pattern = re.compile(r'^[^\s@]+@[^\s@]+\.[^\s@]+$')
+                input_values = [t.strip().lower() for t in tokens_raw if email_pattern.match(t.strip())]
+                invalid = [t.strip() for t in tokens_raw if not email_pattern.match(t.strip())]
+            else:  # Student ID — no strict format, just de-blank and de-space
+                input_values = [t.strip() for t in tokens_raw]
+                invalid = []
+
+            if not input_values:
+                st.error(f"No valid {idm_input_type.lower()}s found. Please check your input.")
             else:
                 # ── Load student data ─────────────────────────────────────────
                 df_gc = None
@@ -5031,15 +5038,13 @@ if t3 is not None:
                 if df_gc is None:
                     st.warning("Please upload a Student List CSV (or load one via the Booklet Creator tab first).")
                 else:
-                    # ── Build email → student_id lookup ──────────────────────
-                    # Look for an email column — try common names
+                    # ── Locate the email column (auto-detected — not in config.yaml) ──
                     email_col = None
                     for candidate in ["Email", "email", "Email address", "Email Address",
                                       "Student email", "Student Email", "EmailAddress"]:
                         if candidate in df_gc.columns:
                             email_col = candidate
                             break
-                    # Fallback: find any column whose name contains "email" (case-insensitive)
                     if email_col is None:
                         for col in df_gc.columns:
                             if "email" in col.lower():
@@ -5049,53 +5054,75 @@ if t3 is not None:
                     id_col = COLS.get('student_id', 'Code')
                     fname_col = COLS.get('first_name', 'First name')
                     sname_col = COLS.get('surname', 'Surname')
-
-                    matched_ids = []
-                    matched_details = []  # (email, id, name)
-                    unmatched_emails = []
                     no_email_col = email_col is None
 
-                    if not no_email_col:
-                        # Build a lookup dict: normalised_email → (student_id, name)
+                    matched_values = []
+                    matched_details = []   # (input_value, output_value, name)
+                    unmatched_inputs = []
+                    csv_unmatched = []     # (display_key, name) — CSV rows never hit by the pasted list
+
+                    if no_email_col:
+                        unmatched_inputs = input_values
+                    else:
+                        # key_col = column holding what the user pasted in;
+                        # val_col = column holding what we look up and return.
+                        key_col, val_col = (email_col, id_col) if idm_input_type == "Email" else (id_col, email_col)
+                        normalise = (lambda v: str(v).strip().lower()) if idm_input_type == "Email" else (lambda v: str(v).strip())
+
                         lookup = {}
                         for _, row in df_gc.iterrows():
-                            raw_email = str(row.get(email_col, "")).strip().lower()
-                            if raw_email and raw_email != 'nan':
-                                sid = str(row.get(id_col, "")).strip()
+                            raw_key = str(row.get(key_col, "")).strip()
+                            key = raw_key.lower() if idm_input_type == "Email" else raw_key
+                            if key and key != 'nan':
+                                out_val = str(row.get(val_col, "")).strip()
                                 fname = str(row.get(fname_col, "")).strip()
                                 sname = str(row.get(sname_col, "")).strip()
                                 full_name = f"{fname} {sname}".strip()
-                                lookup[raw_email] = (sid, full_name)
+                                # Later rows with a duplicate key simply overwrite —
+                                # matches existing single-lookup behaviour.
+                                lookup[key] = (out_val, full_name, raw_key)
 
-                        for email in emails:
-                            if email in lookup:
-                                sid, name = lookup[email]
-                                matched_ids.append(sid)
-                                matched_details.append((email, sid, name))
+                        matched_keys_used = set()
+                        for val in input_values:
+                            key = normalise(val)
+                            if key in lookup:
+                                out_val, name, _ = lookup[key]
+                                matched_values.append(out_val)
+                                matched_details.append((val, out_val, name))
+                                matched_keys_used.add(key)
                             else:
-                                unmatched_emails.append(email)
-                    else:
-                        unmatched_emails = emails
+                                unmatched_inputs.append(val)
+
+                        csv_unmatched = [
+                            (display_key, name)
+                            for key, (out_val, name, display_key) in lookup.items()
+                            if key not in matched_keys_used
+                        ]
 
                     # ── Store results ─────────────────────────────────────────
                     st.session_state.group_results = {
-                        "matched_ids": matched_ids,
+                        "matched_values": matched_values,
                         "matched_details": matched_details,
-                        "unmatched_emails": unmatched_emails,
+                        "unmatched_inputs": unmatched_inputs,
+                        "csv_unmatched": csv_unmatched,
                         "invalid_tokens": invalid,
                         "no_email_col": no_email_col,
                         "email_col_used": email_col,
+                        "input_type": idm_input_type,
+                        "output_type": idm_output_type,
                     }
                     st.rerun()
 
     # ── Display results ───────────────────────────────────────────────────────
     if st.session_state.group_results:
         res = st.session_state.group_results
-        matched_ids    = res["matched_ids"]
-        matched_details = res["matched_details"]
-        unmatched_emails = res["unmatched_emails"]
-        invalid_tokens = res["invalid_tokens"]
-        no_email_col   = res["no_email_col"]
+        matched_values   = res["matched_values"]
+        matched_details  = res["matched_details"]
+        unmatched_inputs = res["unmatched_inputs"]
+        invalid_tokens   = res["invalid_tokens"]
+        no_email_col     = res["no_email_col"]
+        res_input_type   = res["input_type"]
+        res_output_type  = res["output_type"]
 
         st.markdown("---")
 
@@ -5109,41 +5136,64 @@ if t3 is not None:
             result_col1, result_col2 = st.columns([3, 2])
 
             with result_col1:
-                if matched_ids:
-                    st.markdown(f'<div class="group-output-label">✅ {len(matched_ids)} student code{"s" if len(matched_ids) != 1 else ""} found — copy and paste into SEQTA</div>', unsafe_allow_html=True)
-                    codes_text = "\n".join(matched_ids)
+                if matched_values:
+                    is_id_output = (res_output_type == "Student ID")
+                    label_noun = "student code" if is_id_output else res_output_type.lower()
+                    st.markdown(f'<div class="group-output-label">✅ {len(matched_values)} {label_noun}{"s" if len(matched_values) != 1 else ""} found{" — copy and paste into SEQTA" if is_id_output else ""}</div>', unsafe_allow_html=True)
+                    output_text = "\n".join(matched_values)
                     st.text_area(
-                        "Student codes output",
-                        value=codes_text,
-                        height=max(120, min(400, len(matched_ids) * 26)),
+                        "Matched output values",
+                        value=output_text,
+                        height=max(120, min(400, len(matched_values) * 26)),
                         label_visibility="collapsed",
                         key="gc_output_box"
                     )
-                    st.markdown("""
-                    <div class="seqta-instruction">
-                      <strong>📌 Next step:</strong> In SEQTA, open your
-                      <a href="https://teach.friends.tas.edu.au/students/classes" target="_blank" style="color:#7a5a00;font-weight:600">custom group editor</a>,
-                      paste these codes one per line into the box on the left, then click <strong>OK</strong>.
-                    </div>
-                    """, unsafe_allow_html=True)
+                    if is_id_output:
+                        st.markdown("""
+                        <div class="seqta-instruction">
+                          <strong>📌 Next step:</strong> In SEQTA, open your
+                          <a href="https://teach.friends.tas.edu.au/students/classes" target="_blank" style="color:#7a5a00;font-weight:600">custom group editor</a>,
+                          paste these codes one per line into the box on the left, then click <strong>OK</strong>.
+                        </div>
+                        """, unsafe_allow_html=True)
                 else:
-                    st.info("No student codes were matched. Check the emails and CSV below.")
+                    st.info(f"No {res_output_type.lower()}s were matched. Check the {res_input_type.lower()}s and CSV below.")
 
             with result_col2:
                 if matched_details:
                     with st.expander(f"✅ {len(matched_details)} matched", expanded=False):
-                        for email, sid, name in matched_details:
-                            st.markdown(f"<span style='font-size:0.8rem'><b>{sid}</b> — {name}<br><span style='color:#9295a8'>{email}</span></span>", unsafe_allow_html=True)
+                        for in_val, out_val, name in matched_details:
+                            st.markdown(f"<span style='font-size:0.8rem'><b>{out_val}</b> — {name}<br><span style='color:#9295a8'>{in_val}</span></span>", unsafe_allow_html=True)
 
-                if unmatched_emails:
-                    with st.expander(f"❌ {len(unmatched_emails)} email{'s' if len(unmatched_emails) != 1 else ''} not matched", expanded=True):
-                        st.caption("These emails were not found in the student list CSV.")
-                        for em in unmatched_emails:
-                            st.markdown(f"<span style='font-size:0.8rem;color:#c0392b'>{em}</span>", unsafe_allow_html=True)
+                if unmatched_inputs or res["csv_unmatched"]:
+                    nm_view = st.radio(
+                        "Show unmatched from",
+                        options=[f"My {res_input_type.lower()} list", "Student list CSV"],
+                        horizontal=True,
+                        key="gc_nm_view"
+                    )
+
+                    if nm_view.startswith("My"):
+                        if unmatched_inputs:
+                            with st.expander(f"❌ {len(unmatched_inputs)} {res_input_type.lower()}{'s' if len(unmatched_inputs) != 1 else ''} not matched", expanded=True):
+                                st.caption(f"These {res_input_type.lower()}s you pasted in weren't found in the student list CSV.")
+                                for val in unmatched_inputs:
+                                    st.markdown(f"<span style='font-size:0.8rem;color:#c0392b'>{val}</span>", unsafe_allow_html=True)
+                        else:
+                            st.caption(f"Every {res_input_type.lower()} you pasted in was matched. ✅")
+                    else:
+                        csv_unmatched = res["csv_unmatched"]
+                        if csv_unmatched:
+                            with st.expander(f"❌ {len(csv_unmatched)} student{'s' if len(csv_unmatched) != 1 else ''} in the CSV not matched", expanded=True):
+                                st.caption(f"These students from the student list CSV weren't found in the {res_input_type.lower()}s you pasted in.")
+                                for display_key, name in csv_unmatched:
+                                    st.markdown(f"<span style='font-size:0.8rem;color:#c0392b'>{name} <span style='color:#9295a8'>— {display_key}</span></span>", unsafe_allow_html=True)
+                        else:
+                            st.caption("Every student in the CSV was matched. ✅")
 
                 if invalid_tokens:
                     with st.expander(f"⚠️ {len(invalid_tokens)} invalid token{'s' if len(invalid_tokens) != 1 else ''} skipped"):
-                        st.caption("These entries didn't look like email addresses and were ignored.")
+                        st.caption(f"These entries didn't look like {res_input_type.lower()}s and were ignored.")
                         for tok in invalid_tokens:
                             st.markdown(f"<span style='font-size:0.8rem;color:#9295a8'>{tok}</span>", unsafe_allow_html=True)
 
