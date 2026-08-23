@@ -4908,6 +4908,30 @@ if t2 is not None:
                         st.download_button("⬇ Download Medical Booklet", data=pdf_data,
                                            file_name="Medical_Booklet.pdf", mime="application/pdf")
 
+def _idm_format_name(fname, pref, surname, fmt):
+    """Format a student's name for ID Matcher Name output, per the chosen format."""
+    fname   = (fname or "").strip()
+    pref    = (pref or "").strip()
+    surname = (surname or "").strip()
+    effective_pref = pref if pref else fname  # fall back to first name if no preferred name on file
+
+    if fmt == "First Name + Surname":
+        return f"{fname} {surname}".strip()
+    elif fmt == "Preferred Name + Surname":
+        return f"{effective_pref} {surname}".strip()
+    elif fmt == "First Name (Preferred Name) + Surname":
+        if pref and pref.lower() != fname.lower():
+            return f"{fname} ({pref}) {surname}".strip()
+        return f"{fname} {surname}".strip()
+    elif fmt == "Preferred Name":
+        return effective_pref
+    elif fmt == "Surname":
+        return surname
+    elif fmt == "First Name":
+        return fname
+    return f"{effective_pref} {surname}".strip()
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # TAB 3 — ID MATCHER
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -4927,6 +4951,16 @@ if t3 is not None:
     # ── Step 1: Input / Output type ───────────────────────────────────────────
     st.markdown('''<div class="section-head">Step 1 — What are you matching?</div>''', unsafe_allow_html=True)
     _idm_options = ["Name", "Student ID", "Email"]
+    _IDM_NAME_FORMATS = [
+        "Preferred Name + Surname",
+        "First Name + Surname",
+        "First Name (Preferred Name) + Surname",
+        "Preferred Name",
+        "Surname",
+        "First Name",
+    ]
+    if 'idm_name_format' not in st.session_state:
+        st.session_state.idm_name_format = "Preferred Name + Surname"
 
     idm_col1, idm_col2 = st.columns(2)
     with idm_col1:
@@ -4946,17 +4980,33 @@ if t3 is not None:
     st.session_state.idm_input_type = idm_input_type
     st.session_state.idm_output_type = idm_output_type
 
-    # Only Email ↔ Student ID is wired up so far; flag anything else clearly.
-    _idm_supported = (
-        {idm_input_type, idm_output_type} == {"Email", "Student ID"}
-    )
+    # When the output is Name, let the user pick how it's formatted.
+    if idm_output_type == "Name":
+        idm_name_format = st.selectbox(
+            "Name output format",
+            options=_IDM_NAME_FORMATS,
+            index=_IDM_NAME_FORMATS.index(st.session_state.idm_name_format),
+            key="idm_name_format_box"
+        )
+        st.session_state.idm_name_format = idm_name_format
+    else:
+        idm_name_format = st.session_state.idm_name_format
+
+    # Combinations wired up so far: Email ↔ Student ID, and Student ID/Email → Name.
+    _idm_supported_pairs = {
+        ("Email", "Student ID"),
+        ("Student ID", "Email"),
+        ("Student ID", "Name"),
+        ("Email", "Name"),
+    }
+    _idm_supported = (idm_input_type, idm_output_type) in _idm_supported_pairs
     if idm_input_type == idm_output_type:
         st.warning("Input and output are the same — pick two different fields.")
     elif not _idm_supported:
         st.info(
             f"🚧 {idm_input_type} → {idm_output_type} matching is coming soon. "
-            "For now, Email ↔ Student ID (either direction) is active — the layout is ready and the "
-            "other combinations will be wired up next."
+            "For now, Email ↔ Student ID, and Student ID / Email → Name are active — the layout is "
+            "ready and the remaining combinations will be wired up next."
         )
 
     st.markdown("<br>", unsafe_allow_html=True)
@@ -5051,22 +5101,21 @@ if t3 is not None:
                                 email_col = col
                                 break
 
-                    id_col = COLS.get('student_id', 'Code')
+                    id_col    = COLS.get('student_id', 'Code')
                     fname_col = COLS.get('first_name', 'First name')
+                    pref_col  = COLS.get('preferred_name', 'Preferred name')
                     sname_col = COLS.get('surname', 'Surname')
-                    no_email_col = email_col is None
+                    no_email_col = email_col is None and (idm_input_type == "Email" or idm_output_type == "Email")
 
-                    matched_values = []
-                    matched_details = []   # (input_value, output_value, name)
+                    matched_rows = []      # (input_value, row_dict) — row_dict has id/email/fname/pref/surname
                     unmatched_inputs = []
                     csv_unmatched = []     # (display_key, name) — CSV rows never hit by the pasted list
 
                     if no_email_col:
                         unmatched_inputs = input_values
                     else:
-                        # key_col = column holding what the user pasted in;
-                        # val_col = column holding what we look up and return.
-                        key_col, val_col = (email_col, id_col) if idm_input_type == "Email" else (id_col, email_col)
+                        # key_col = column holding what the user pasted in.
+                        key_col = email_col if idm_input_type == "Email" else id_col
                         normalise = (lambda v: str(v).strip().lower()) if idm_input_type == "Email" else (lambda v: str(v).strip())
 
                         lookup = {}
@@ -5074,35 +5123,40 @@ if t3 is not None:
                             raw_key = str(row.get(key_col, "")).strip()
                             key = raw_key.lower() if idm_input_type == "Email" else raw_key
                             if key and key != 'nan':
-                                out_val = str(row.get(val_col, "")).strip()
-                                fname = str(row.get(fname_col, "")).strip()
-                                sname = str(row.get(sname_col, "")).strip()
-                                full_name = f"{fname} {sname}".strip()
+                                row_dict = {
+                                    "id": str(row.get(id_col, "")).strip(),
+                                    "email": str(row.get(email_col, "")).strip() if email_col else "",
+                                    "fname": str(row.get(fname_col, "")).strip(),
+                                    "pref": str(row.get(pref_col, "")).strip(),
+                                    "surname": str(row.get(sname_col, "")).strip(),
+                                }
+                                full_name = f"{row_dict['fname']} {row_dict['surname']}".strip()
                                 # Later rows with a duplicate key simply overwrite —
                                 # matches existing single-lookup behaviour.
-                                lookup[key] = (out_val, full_name, raw_key)
+                                lookup[key] = (row_dict, full_name, raw_key)
 
                         matched_keys_used = set()
                         for val in input_values:
                             key = normalise(val)
                             if key in lookup:
-                                out_val, name, _ = lookup[key]
-                                matched_values.append(out_val)
-                                matched_details.append((val, out_val, name))
+                                row_dict, name, _ = lookup[key]
+                                matched_rows.append((val, row_dict))
                                 matched_keys_used.add(key)
                             else:
                                 unmatched_inputs.append(val)
 
                         csv_unmatched = [
                             (display_key, name)
-                            for key, (out_val, name, display_key) in lookup.items()
+                            for key, (row_dict, name, display_key) in lookup.items()
                             if key not in matched_keys_used
                         ]
 
                     # ── Store results ─────────────────────────────────────────
+                    # Output values aren't baked in here — they're computed at display
+                    # time from matched_rows, so switching the Name output format
+                    # afterwards updates the results instantly without re-matching.
                     st.session_state.group_results = {
-                        "matched_values": matched_values,
-                        "matched_details": matched_details,
+                        "matched_rows": matched_rows,
                         "unmatched_inputs": unmatched_inputs,
                         "csv_unmatched": csv_unmatched,
                         "invalid_tokens": invalid,
@@ -5113,16 +5167,34 @@ if t3 is not None:
                     }
                     st.rerun()
 
+
+
     # ── Display results ───────────────────────────────────────────────────────
     if st.session_state.group_results:
         res = st.session_state.group_results
-        matched_values   = res["matched_values"]
-        matched_details  = res["matched_details"]
-        unmatched_inputs = res["unmatched_inputs"]
-        invalid_tokens   = res["invalid_tokens"]
-        no_email_col     = res["no_email_col"]
-        res_input_type   = res["input_type"]
-        res_output_type  = res["output_type"]
+        matched_rows      = res["matched_rows"]      # (input_value, row_dict)
+        unmatched_inputs  = res["unmatched_inputs"]
+        invalid_tokens    = res["invalid_tokens"]
+        no_email_col      = res["no_email_col"]
+        res_input_type    = res["input_type"]
+        res_output_type   = res["output_type"]
+
+        # Output values are computed here (not at match time) so switching the
+        # Name output format afterwards updates results instantly, no re-run needed.
+        def _idm_output_value(row_dict):
+            if res_output_type == "Student ID":
+                return row_dict["id"]
+            elif res_output_type == "Email":
+                return row_dict["email"]
+            elif res_output_type == "Name":
+                return _idm_format_name(row_dict["fname"], row_dict["pref"], row_dict["surname"], st.session_state.idm_name_format)
+            return ""
+
+        matched_values = [_idm_output_value(row_dict) for _, row_dict in matched_rows]
+        matched_details = [
+            (in_val, _idm_output_value(row_dict), f"{row_dict['fname']} {row_dict['surname']}".strip())
+            for in_val, row_dict in matched_rows
+        ]
 
         st.markdown("---")
 
@@ -5163,7 +5235,9 @@ if t3 is not None:
                 if matched_details:
                     with st.expander(f"✅ {len(matched_details)} matched", expanded=False):
                         for in_val, out_val, name in matched_details:
-                            st.markdown(f"<span style='font-size:0.8rem'><b>{out_val}</b> — {name}<br><span style='color:#9295a8'>{in_val}</span></span>", unsafe_allow_html=True)
+                            # When the output IS the name, skip the redundant " — name" suffix.
+                            detail_line = f"<b>{out_val}</b>" if res_output_type == "Name" else f"<b>{out_val}</b> — {name}"
+                            st.markdown(f"<span style='font-size:0.8rem'>{detail_line}<br><span style='color:#9295a8'>{in_val}</span></span>", unsafe_allow_html=True)
 
                 if unmatched_inputs or res["csv_unmatched"]:
                     nm_view = st.radio(
