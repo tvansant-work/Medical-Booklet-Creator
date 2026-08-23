@@ -188,6 +188,8 @@ if 'idm_input_type' not in st.session_state:
     st.session_state.idm_input_type = "Email"  # What the user is pasting in: Name | Student ID | Email
 if 'idm_output_type' not in st.session_state:
     st.session_state.idm_output_type = "Student ID"  # What the user wants back: Name | Student ID | Email
+if 'idm_name_manual_selections' not in st.session_state:
+    st.session_state.idm_name_manual_selections = {}  # { review_item_key: row_dict } — Name-matching manual picks
 if 'seqta_contact_matched' not in st.session_state:
     st.session_state.seqta_contact_matched = {}
 if 'seqta_contact_unmatched' not in st.session_state:
@@ -4908,6 +4910,133 @@ if t2 is not None:
                         st.download_button("⬇ Download Medical Booklet", data=pdf_data,
                                            file_name="Medical_Booklet.pdf", mime="application/pdf")
 
+# ── ID Matcher — Name-matching engine ───────────────────────────────────────
+# Thresholds are deliberately conservative: two students can share a name,
+# and typos can look close enough to a WRONG student to be dangerous if
+# auto-accepted. When in doubt this always falls through to manual review
+# rather than guessing.
+_IDM_AUTO_THRESHOLD    = 0.97   # essentially "same spelling" after normalising
+_IDM_AUTO_UNIQUE_GAP   = 0.03   # 2nd-best candidate must be at least this much lower to auto-accept
+_IDM_SUGGEST_THRESHOLD = 0.72   # pre-select this candidate in the manual dropdown, but still require a click
+_IDM_CANDIDATE_FLOOR   = 0.35   # below this, don't bother surfacing as a ranked suggestion
+_IDM_MAX_CANDIDATES    = 6      # how many ranked suggestions to show per entry
+
+
+def _idm_normalize_text(s):
+    """Lowercase, strip accents/punctuation, collapse whitespace — so
+    'Sofía O'Brien-Smith' and 'sofia obrien smith' compare equal."""
+    s = (s or "").strip().lower()
+    s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('ascii')
+    s = re.sub(r"[.,'’`_-]", " ", s)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+
+def _idm_token_ratio(a, b):
+    """difflib ratio between two normalised strings, comparing SORTED tokens
+    so word order doesn't matter — 'Smith John' still matches 'John Smith'."""
+    ta = " ".join(sorted(a.split()))
+    tb = " ".join(sorted(b.split()))
+    if not ta or not tb:
+        return 0.0
+    return difflib.SequenceMatcher(None, ta, tb).ratio()
+
+
+def _idm_build_roster(df_gc):
+    """One row_dict per CSV row: id/email/fname/pref/surname/year/roll,
+    plus pre-normalised name fields for fast repeated scoring."""
+    id_col    = COLS.get('student_id', 'Code')
+    email_col = None
+    for candidate in ["Email", "email", "Email address", "Email Address",
+                       "Student email", "Student Email", "EmailAddress"]:
+        if candidate in df_gc.columns:
+            email_col = candidate
+            break
+    if email_col is None:
+        for col in df_gc.columns:
+            if "email" in col.lower():
+                email_col = col
+                break
+    fname_col = COLS.get('first_name', 'First name')
+    pref_col  = COLS.get('preferred_name', 'Preferred name')
+    sname_col = COLS.get('surname', 'Surname')
+    year_col  = COLS.get('year', 'Year')
+    roll_col  = COLS.get('rollgroup', 'Rollgroup')
+
+    roster = []
+    for _, row in df_gc.iterrows():
+        fname   = str(row.get(fname_col, "")).strip()
+        pref    = str(row.get(pref_col, "")).strip()
+        surname = str(row.get(sname_col, "")).strip()
+        if not fname and not surname:
+            continue
+        rd = {
+            "id": str(row.get(id_col, "")).strip(),
+            "email": str(row.get(email_col, "")).strip() if email_col else "",
+            "fname": fname,
+            "pref": pref,
+            "surname": surname,
+            "year": str(row.get(year_col, "")).strip(),
+            "roll": str(row.get(roll_col, "")).strip(),
+        }
+        rd["_norm_full"]  = _idm_normalize_text(f"{fname} {surname}")
+        rd["_norm_pref"]  = _idm_normalize_text(f"{pref or fname} {surname}")
+        rd["_norm_first"] = _idm_normalize_text(fname)
+        rd["_norm_pref_only"] = _idm_normalize_text(pref or fname)
+        rd["_norm_sur"]   = _idm_normalize_text(surname)
+        roster.append(rd)
+    return roster, email_col
+
+
+def _idm_score_entry(entry, paste_format, roster):
+    """Score one pasted entry against every roster row.
+    entry is either a full-name string (paste_format == 'single')
+    or a (first_field, surname_field) tuple (paste_format == 'two_col').
+    Returns a list of (row_dict, score) sorted best-first."""
+    scored = []
+    if paste_format == "two_col":
+        first_field, surname_field = entry
+        n_first = _idm_normalize_text(first_field)
+        n_sur   = _idm_normalize_text(surname_field)
+        for rd in roster:
+            first_score = max(
+                _idm_token_ratio(n_first, rd["_norm_first"]),
+                _idm_token_ratio(n_first, rd["_norm_pref_only"]),
+            ) if n_first else 0.0
+            sur_score = _idm_token_ratio(n_sur, rd["_norm_sur"]) if n_sur else 0.0
+            # Both halves need to individually look right — a great surname
+            # match with no first-name signal at all shouldn't count as strong.
+            score = (first_score + sur_score) / 2 if n_first and n_sur else max(first_score, sur_score)
+            if score >= _IDM_CANDIDATE_FLOOR:
+                scored.append((rd, score))
+    else:
+        n_full = _idm_normalize_text(entry)
+        for rd in roster:
+            score = max(
+                _idm_token_ratio(n_full, rd["_norm_full"]),
+                _idm_token_ratio(n_full, rd["_norm_pref"]),
+            )
+            if score >= _IDM_CANDIDATE_FLOOR:
+                scored.append((rd, score))
+
+    scored.sort(key=lambda t: t[1], reverse=True)
+    return scored[:_IDM_MAX_CANDIDATES]
+
+
+def _idm_classify_entry(candidates):
+    """Given ranked (row_dict, score) candidates, decide: auto-match,
+    a pre-selected suggestion for manual review, or no suggestion at all."""
+    if not candidates:
+        return None, None  # (auto_row_or_None, suggested_row_or_None)
+    top_row, top_score = candidates[0]
+    if top_score >= _IDM_AUTO_THRESHOLD:
+        second_score = candidates[1][1] if len(candidates) > 1 else 0.0
+        if top_score - second_score >= _IDM_AUTO_UNIQUE_GAP:
+            return top_row, None  # confidently unique — auto-match
+    suggested = top_row if top_score >= _IDM_SUGGEST_THRESHOLD else None
+    return None, suggested
+
+
 def _idm_format_name(fname, pref, surname, fmt):
     """Format a student's name for ID Matcher Name output, per the chosen format."""
     fname   = (fname or "").strip()
@@ -4992,42 +5121,90 @@ if t3 is not None:
     else:
         idm_name_format = st.session_state.idm_name_format
 
-    # Combinations wired up so far: Email ↔ Student ID, and Student ID/Email → Name.
+    # Combinations wired up so far: Email ↔ Student ID, Student ID/Email → Name,
+    # and now Name → Student ID / Email.
     _idm_supported_pairs = {
         ("Email", "Student ID"),
         ("Student ID", "Email"),
         ("Student ID", "Name"),
         ("Email", "Name"),
+        ("Name", "Student ID"),
+        ("Name", "Email"),
     }
     _idm_supported = (idm_input_type, idm_output_type) in _idm_supported_pairs
     if idm_input_type == idm_output_type:
         st.warning("Input and output are the same — pick two different fields.")
     elif not _idm_supported:
-        st.info(
-            f"🚧 {idm_input_type} → {idm_output_type} matching is coming soon. "
-            "For now, Email ↔ Student ID, and Student ID / Email → Name are active — the layout is "
-            "ready and the remaining combinations will be wired up next."
+        st.info(f"🚧 {idm_input_type} → {idm_output_type} matching is coming soon.")
+
+    # When the input is Name, ask how it's been pasted in — this materially
+    # changes match reliability, so it's worth a conscious choice rather than guessing.
+    _IDM_PASTE_FORMATS = [
+        "One name per line (e.g. \"John Smith\")",
+        "Two columns — pasted straight from a spreadsheet (First/Preferred Name, then Surname)",
+    ]
+    if 'idm_name_paste_format' not in st.session_state:
+        st.session_state.idm_name_paste_format = _IDM_PASTE_FORMATS[0]
+
+    if idm_input_type == "Name":
+        idm_paste_format_label = st.radio(
+            "How is your list formatted?",
+            options=_IDM_PASTE_FORMATS,
+            index=_IDM_PASTE_FORMATS.index(st.session_state.idm_name_paste_format),
+            key="idm_name_paste_format_box"
         )
+        st.session_state.idm_name_paste_format = idm_paste_format_label
+        idm_paste_format = "two_col" if idm_paste_format_label.startswith("Two columns") else "single"
+        if idm_paste_format == "two_col":
+            st.caption(
+                "Copy two adjacent columns (First or Preferred Name, then Surname) straight out of "
+                "Excel or Google Sheets and paste below — the tab characters between columns are kept "
+                "even though it looks like plain text, so each row is read as one student."
+            )
+    else:
+        idm_paste_format = "single"
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── Step 2: Paste the list ────────────────────────────────────────────────
     st.markdown(f'''<div class="section-head">Step 2 — Paste your list of {idm_input_type.lower()}s</div>''', unsafe_allow_html=True)
-    st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">Paste values separated by spaces, commas, semicolons, colons, pipes or newlines — any mix.</p>', unsafe_allow_html=True)
+    if idm_input_type == "Name" and idm_paste_format == "two_col":
+        st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">Paste two columns copied from a spreadsheet — one student per row.</p>', unsafe_allow_html=True)
+    elif idm_input_type == "Name":
+        st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">One full name per line.</p>', unsafe_allow_html=True)
+    else:
+        st.markdown('<p style="font-size:0.82rem;color:#6b6f82;margin-bottom:8px;">Paste values separated by spaces, commas, semicolons, colons, pipes or newlines — any mix.</p>', unsafe_allow_html=True)
     _idm_placeholders = {
-        "Name": "e.g.\nJohn Smith, Kate Jones\nTom Brown",
+        "Name_single": "e.g.\nJohn Smith\nKate Jones\nTom Brown",
+        "Name_two_col": "e.g. (paste columns from a spreadsheet)\nJohn\tSmith\nKate\tJones\nTom\tBrown",
         "Student ID": "e.g.\n1023, 1044\n1078",
         "Email": "e.g.\nsmith.j@school.edu.au, jones.k@school.edu.au\nbrown.t@school.edu.au",
     }
+    _idm_placeholder_key = f"Name_{idm_paste_format}" if idm_input_type == "Name" else idm_input_type
     email_input = st.text_area(
         "Values to match",
         value=st.session_state.group_email_input,
         height=160,
-        placeholder=_idm_placeholders.get(idm_input_type, ""),
+        placeholder=_idm_placeholders.get(_idm_placeholder_key, ""),
         label_visibility="collapsed",
         key="gc_email_box"
     )
     st.session_state.group_email_input = email_input
+
+    # Live preview for two-column paste, so a misaligned copy/paste is caught
+    # before running the match rather than after.
+    if idm_input_type == "Name" and idm_paste_format == "two_col" and email_input.strip():
+        _preview_rows = []
+        for _line in email_input.strip().split("\n"):
+            if not _line.strip():
+                continue
+            _parts = _line.split("\t") if "\t" in _line else _line.split(",", 1)
+            _first = _parts[0].strip() if len(_parts) > 0 else ""
+            _sur = _parts[1].strip() if len(_parts) > 1 else ""
+            _preview_rows.append({"First / Preferred Name": _first, "Surname": _sur})
+        if _preview_rows:
+            st.caption(f"📋 Preview — {len(_preview_rows)} row{'s' if len(_preview_rows) != 1 else ''} detected:")
+            st.dataframe(pd.DataFrame(_preview_rows), height=min(250, 40 + 35 * len(_preview_rows)), use_container_width=True, hide_index=True)
 
     # ── Step 3: Student List CSV ──────────────────────────────────────────────
     st.markdown('''<div class="section-head">Step 3 — Student List CSV</div>''', unsafe_allow_html=True)
@@ -5058,7 +5235,85 @@ if t3 is not None:
         raw_text = st.session_state.group_email_input.strip()
         if not raw_text:
             st.warning(f"Please paste at least one {idm_input_type.lower()}.")
+
+        # ══════════════════════════════════════════════════════════════════
+        # NAME INPUT — fuzzy/tiered matching engine
+        # ══════════════════════════════════════════════════════════════════
+        elif idm_input_type == "Name":
+            raw_lines = [l for l in raw_text.split("\n") if l.strip()]
+            entries = []  # list of (display_text, entry_for_scoring)
+            if idm_paste_format == "two_col":
+                for line in raw_lines:
+                    parts = line.split("\t") if "\t" in line else line.split(",", 1)
+                    first = parts[0].strip() if len(parts) > 0 else ""
+                    surname = parts[1].strip() if len(parts) > 1 else ""
+                    entries.append((f"{first} {surname}".strip(), (first, surname)))
+            else:
+                for line in raw_lines:
+                    name = line.strip()
+                    entries.append((name, name))
+
+            if not entries:
+                st.error("No names found. Please check your input.")
+            else:
+                df_gc = None
+                if gc_csv is not None:
+                    try:
+                        gc_csv.seek(0)
+                        df_gc = pd.read_csv(gc_csv).fillna("")
+                    except Exception as e:
+                        st.error(f"Could not read uploaded CSV: {e}")
+                elif "df_final" in st.session_state:
+                    df_gc = st.session_state.df_final
+
+                if df_gc is None:
+                    st.warning("Please upload a Student List CSV (or load one via the Booklet Creator tab first).")
+                else:
+                    roster, email_col_nm = _idm_build_roster(df_gc)
+                    no_email_col = email_col_nm is None and idm_output_type == "Email"
+
+                    auto_matched = []   # (display, row_dict)
+                    review_items = []   # {key, display, candidates:[(row_dict,score)...], suggested_id}
+
+                    for i, (display, entry) in enumerate(entries):
+                        candidates = _idm_score_entry(entry, idm_paste_format, roster)
+                        auto_row, suggested_row = _idm_classify_entry(candidates)
+                        if auto_row is not None:
+                            auto_matched.append((display, auto_row))
+                        else:
+                            review_items.append({
+                                "key": f"nm_{i}",
+                                "display": display,
+                                "candidates": candidates,
+                                "suggested_id": suggested_row["id"] if suggested_row else None,
+                            })
+
+                    matched_ids = {row["id"] for _, row in auto_matched}
+                    csv_unmatched = [
+                        (rd["id"], f"{rd['fname']} {rd['surname']}".strip())
+                        for rd in roster if rd["id"] not in matched_ids
+                    ]
+
+                    st.session_state.idm_name_manual_selections = {}
+                    st.session_state.group_results = {
+                        "matched_rows": auto_matched,
+                        "review_items": review_items,
+                        "csv_unmatched": csv_unmatched,
+                        "invalid_tokens": [],
+                        "no_email_col": no_email_col,
+                        "email_col_used": email_col_nm,
+                        "input_type": idm_input_type,
+                        "output_type": idm_output_type,
+                        "is_name_input": True,
+                    }
+                    st.rerun()
+
+        # ══════════════════════════════════════════════════════════════════
+        # STUDENT ID / EMAIL INPUT — exact-match lookup (unchanged)
+        # ══════════════════════════════════════════════════════════════════
         else:
+            # Split on any combination of: commas, semicolons, colons, pipes, spaces,
+            # newlines or tabs — any mix of these, in any amount, counts as a separator.
             tokens_raw = [t for t in re.split(r'[\s,;:|]+', raw_text) if t]
 
             if idm_input_type == "Email":
@@ -5164,13 +5419,158 @@ if t3 is not None:
                         "email_col_used": email_col,
                         "input_type": idm_input_type,
                         "output_type": idm_output_type,
+                        "is_name_input": False,
                     }
                     st.rerun()
 
 
 
-    # ── Display results ───────────────────────────────────────────────────────
-    if st.session_state.group_results:
+    # ── Display results — Name input (tiered auto-match + manual review) ──────
+    if st.session_state.group_results and st.session_state.group_results.get("is_name_input"):
+        res = st.session_state.group_results
+        auto_rows       = res["matched_rows"]     # (display, row_dict) — confidently auto-matched
+        review_items    = res["review_items"]     # need a human decision
+        csv_unmatched0  = res["csv_unmatched"]
+        no_email_col    = res["no_email_col"]
+        res_output_type = res["output_type"]
+
+        def _idm_output_value_nm(row_dict):
+            if res_output_type == "Student ID":
+                return row_dict["id"]
+            elif res_output_type == "Email":
+                return row_dict["email"]
+            return ""
+
+        st.markdown("---")
+
+        if no_email_col:
+            st.error(
+                "⚠️ No email column was found in the student CSV. "
+                "The CSV needs a column with 'email' in the name (e.g. 'Email', 'Email address'). "
+                "Check your export settings in SEQTA."
+            )
+        else:
+            n_auto, n_review = len(auto_rows), len(review_items)
+            st.markdown(
+                f'<div class="group-output-label">🔎 {n_auto} matched automatically'
+                f'{f" · {n_review} need review" if n_review else ""}</div>',
+                unsafe_allow_html=True
+            )
+
+            manual_confirmed = []  # (display, row_dict) — from the dropdowns below
+            if review_items:
+                with st.expander(
+                    f"⚠️  {n_review} name{'s' if n_review != 1 else ''} need manual matching — "
+                    f"closest matches are pre-sorted",
+                    expanded=True
+                ):
+                    st.caption(
+                        "Typos, nicknames, and students who share a name can't always be resolved "
+                        "automatically. Pick the right student for each row below, or leave it as Skip."
+                    )
+                    for item in review_items:
+                        rc1, rc2 = st.columns([2, 3])
+                        with rc1:
+                            st.markdown(f"**{item['display']}**")
+                            if not item["candidates"]:
+                                st.caption("No similar names found in the student list.")
+                        with rc2:
+                            options = ["(Skip)"]
+                            option_map = {}
+                            default_idx = 0
+                            for row_dict, score in item["candidates"]:
+                                label = f"{row_dict['fname']} {row_dict['surname']}"
+                                if row_dict['pref'] and row_dict['pref'].lower() != row_dict['fname'].lower():
+                                    label += f" ({row_dict['pref']})"
+                                label += f" — ID {row_dict['id']}"
+                                if row_dict.get('year'):
+                                    label += f", Year {row_dict['year']}"
+                                if row_dict.get('roll'):
+                                    label += f", {row_dict['roll']}"
+                                label += f"  [{round(score * 100)}% match]"
+                                options.append(label)
+                                option_map[label] = row_dict
+                                if row_dict["id"] == item.get("suggested_id") and default_idx == 0:
+                                    default_idx = len(options) - 1
+                            sel = st.selectbox(
+                                "Assign to student:", options=options, index=default_idx,
+                                key=f"idm_name_review_{item['key']}", label_visibility="collapsed"
+                            )
+                            if sel != "(Skip)":
+                                st.session_state.idm_name_manual_selections[item['key']] = option_map[sel]
+                                manual_confirmed.append((item['display'], option_map[sel]))
+                            elif item['key'] in st.session_state.idm_name_manual_selections:
+                                del st.session_state.idm_name_manual_selections[item['key']]
+                        st.divider()
+            elif n_auto:
+                st.success(f"✅ All {n_auto} names matched automatically")
+
+            all_matched = auto_rows + manual_confirmed
+            matched_values = [_idm_output_value_nm(rd) for _, rd in all_matched]
+            matched_details = [
+                (disp, _idm_output_value_nm(rd), f"{rd['fname']} {rd['surname']}".strip())
+                for disp, rd in all_matched
+            ]
+            matched_ids_final = {rd["id"] for _, rd in all_matched}
+            csv_unmatched = [(sid_, name_) for (sid_, name_) in csv_unmatched0 if sid_ not in matched_ids_final]
+
+            result_col1, result_col2 = st.columns([3, 2])
+            with result_col1:
+                if matched_values:
+                    is_id_output = (res_output_type == "Student ID")
+                    label_noun = "student code" if is_id_output else res_output_type.lower()
+                    st.markdown(
+                        f'<div class="group-output-label">✅ {len(matched_values)} {label_noun}'
+                        f'{"s" if len(matched_values) != 1 else ""} ready'
+                        f'{" — copy and paste into SEQTA" if is_id_output else ""}</div>',
+                        unsafe_allow_html=True
+                    )
+                    output_text = "\n".join(matched_values)
+                    st.text_area(
+                        "Matched output values", value=output_text,
+                        height=max(120, min(400, len(matched_values) * 26)),
+                        label_visibility="collapsed", key="gc_output_box_name"
+                    )
+                    if is_id_output:
+                        st.markdown("""
+                        <div class="seqta-instruction">
+                          <strong>📌 Next step:</strong> In SEQTA, open your
+                          <a href="https://teach.friends.tas.edu.au/students/classes" target="_blank" style="color:#7a5a00;font-weight:600">custom group editor</a>,
+                          paste these codes one per line into the box on the left, then click <strong>OK</strong>.
+                        </div>
+                        """, unsafe_allow_html=True)
+                else:
+                    st.info("No matches confirmed yet — resolve the items above.")
+
+            with result_col2:
+                if matched_details:
+                    with st.expander(f"✅ {len(matched_details)} confirmed", expanded=False):
+                        for in_val, out_val, name in matched_details:
+                            st.markdown(
+                                f"<span style='font-size:0.8rem'><b>{out_val}</b> — {name}"
+                                f"<br><span style='color:#9295a8'>{in_val}</span></span>",
+                                unsafe_allow_html=True
+                            )
+                if csv_unmatched:
+                    with st.expander(f"ℹ️ {len(csv_unmatched)} student(s) in the CSV not referenced", expanded=False):
+                        st.caption(
+                            "These students from the student list weren't matched (automatically or "
+                            "manually) to any of the names you pasted in."
+                        )
+                        for sid_, name_ in csv_unmatched:
+                            st.markdown(
+                                f"<span style='font-size:0.8rem;color:#9295a8'>{name_} — {sid_}</span>",
+                                unsafe_allow_html=True
+                            )
+
+        if st.button("↩  Clear results", key="gc_clear_btn_name"):
+            st.session_state.group_results = None
+            st.session_state.group_email_input = ""
+            st.session_state.idm_name_manual_selections = {}
+            st.rerun()
+
+    # ── Display results — Student ID / Email input (exact match) ──────────────
+    elif st.session_state.group_results:
         res = st.session_state.group_results
         matched_rows      = res["matched_rows"]      # (input_value, row_dict)
         unmatched_inputs  = res["unmatched_inputs"]
