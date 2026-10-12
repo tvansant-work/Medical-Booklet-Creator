@@ -98,8 +98,8 @@
     .matrix-key { font-size: calc(var(--tbl-font) - 0.5pt); color: #555; margin-bottom: 6px; display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; }
     .matrix-key-label { font-weight: bold; color: #333; }
     .matrix-key-item { display: inline-flex; align-items: center; gap: 3px; white-space: nowrap; }
-    .student-name-cell { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 4px; max-width: 100%; }
-    .matrix-symbols { display: inline-flex; align-items: center; gap: 2px; vertical-align: middle; flex-shrink: 0; }
+    .student-name-cell { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px 4px; max-width: 100%; }
+    .matrix-symbols { display: inline-flex; align-items: center; flex-wrap: nowrap; gap: 2px; vertical-align: middle; flex-shrink: 0; }
     .msym { display: block; vertical-align: middle; width: 1.09em; height: 1.09em; }
     .matrix-table td.contact-cell { white-space: normal; }
     .matrix-table td.contact-cell .phone-no { white-space: nowrap; }
@@ -760,6 +760,7 @@
     {% set sym_photo_no = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><path fill="none" stroke="#A32D2D" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round" d="M4 9h3l1.2-1.8h7.6L17 9h3a1.5 1.5 0 0 1 1.5 1.5v7A1.5 1.5 0 0 1 20 19H4a1.5 1.5 0 0 1-1.5-1.5v-7A1.5 1.5 0 0 1 4 9z"/><circle cx="12" cy="13.5" r="3" fill="none" stroke="#A32D2D" stroke-width="1.6"/><path fill="none" stroke="#A32D2D" stroke-width="1.8" stroke-linecap="round" d="M3 4l18 17"/></svg>' | safe %}
     {% set sym_swim_weak = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><circle cx="7" cy="7" r="1.6" fill="#854F0B"/><path fill="none" stroke="#854F0B" stroke-width="1.6" stroke-linecap="round" d="M8.5 9l-2 3"/><path fill="none" stroke="#854F0B" stroke-width="2" stroke-linecap="round" d="M2 15c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/><path fill="none" stroke="#854F0B" stroke-width="2" stroke-linecap="round" d="M2 19c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/></svg>' | safe %}
     {% set sym_swim_cannot = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><circle cx="7" cy="7" r="1.6" fill="#A32D2D"/><path fill="none" stroke="#A32D2D" stroke-width="1.6" stroke-linecap="round" d="M8.5 9l-2 3"/><path fill="none" stroke="#A32D2D" stroke-width="2" stroke-linecap="round" d="M2 15c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/><path fill="none" stroke="#A32D2D" stroke-width="2" stroke-linecap="round" d="M2 19c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/><path fill="none" stroke="#A32D2D" stroke-width="1.8" stroke-linecap="round" d="M3 4l18 17"/></svg>' | safe %}
+    {% set sym_swim_none = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><circle cx="7" cy="9" r="1.6" fill="#6b6b6b"/><path fill="none" stroke="#6b6b6b" stroke-width="1.6" stroke-linecap="round" d="M8.5 11l-2 3"/><path fill="none" stroke="#6b6b6b" stroke-width="2" stroke-linecap="round" d="M2 17c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/><path fill="none" stroke="#6b6b6b" stroke-width="2" stroke-linecap="round" d="M2 21.2c1.6-1.6 3.2-1.6 4.8 0s3.2 1.6 4.8 0 3.2-1.6 4.8 0 3.2 1.6 4.8 0"/><path fill="none" stroke="#333333" stroke-width="1.7" stroke-linecap="round" d="M13.6 4.2c0-1.6 1.2-2.6 2.8-2.6s2.8 1 2.8 2.4c0 2-2.6 2.2-2.6 4.2"/><circle cx="16.6" cy="11.6" r="1.1" fill="#333333"/></svg>' | safe %}
     {% set sym_family_alert = '<svg class="msym" viewBox="0 0 24 24" width="11" height="11"><path fill="none" stroke="#4A3B7A" stroke-width="1.7" stroke-linejoin="round" d="M12 2.5 2.5 20h19z"/><rect x="11.1" y="8.5" width="1.8" height="6" fill="#4A3B7A"/><circle cx="12" cy="16.8" r="1.05" fill="#4A3B7A"/></svg>' | safe %}
 
     <h3>Quick Overview</h3>
@@ -770,12 +771,15 @@
         <span class="matrix-key-item">{{ sym_allergy }} Allergy</span>
         <span class="matrix-key-item">{{ sym_anaphylaxis }} Anaphylaxis</span>
         {% if options.photo_perm %}
+        {% if matrix | selectattr('photo_perm', 'equalto', 'No Response') | list | length > 0 %}
         <span class="matrix-key-item">{{ sym_photo_nr }} No photo response</span>
+        {% endif %}
         <span class="matrix-key-item">{{ sym_photo_no }} Photo declined</span>
         {% endif %}
         {% if options.swimming %}
         <span class="matrix-key-item">{{ sym_swim_weak }} Weak swimmer</span>
         <span class="matrix-key-item">{{ sym_swim_cannot }} Cannot swim</span>
+        <span class="matrix-key-item">{{ sym_swim_none }} No swimming data</span>
         {% endif %}
     </div>
     {%- macro contact_cell(c) -%}
@@ -803,7 +807,7 @@
                 <td>
                     <span class="student-name-cell">
                     <a href="#student-{{row.link_id}}" style="font-weight:bold;">{{ row.name }}</a>
-                    {% if row.family_alert or row.asthma or row.allergy or row.anaphylaxis or (options.photo_perm and row.photo_perm in ('No', 'No Response')) or (options.swimming and (row.swim_weak or row.swim_cannot)) %}
+                    {% if row.family_alert or row.asthma or row.allergy or row.anaphylaxis or (options.photo_perm and row.photo_perm in ('No', 'No Response')) or (options.swimming and (row.swim_weak or row.swim_cannot or row.swim_none or (row.swimming | string | lower) == 'data not recorded')) %}
                     <span class="matrix-symbols">
                         {% if row.family_alert %}{{ sym_family_alert }}{% endif %}
                         {% if row.asthma %}{{ sym_asthma }}{% endif %}
@@ -816,6 +820,7 @@
                         {% if options.swimming %}
                         {% if row.swim_weak %}{{ sym_swim_weak }}{% endif %}
                         {% if row.swim_cannot %}{{ sym_swim_cannot }}{% endif %}
+                        {% if row.swim_none or (row.swimming | string | lower) == 'data not recorded' %}{{ sym_swim_none }}{% endif %}
                         {% endif %}
                     </span>
                     {% endif %}

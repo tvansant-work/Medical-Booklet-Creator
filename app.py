@@ -4146,7 +4146,11 @@ if t2 is not None:
                 nr_count = sum(1 for v in perm_map.values() if v == 'No Response')
                 yes_count = sum(1 for v in perm_map.values() if v == 'Yes')
                 if no_count + nr_count > 0:
-                    st.warning(f"📷 Photo Permissions: {yes_count} Yes · {no_count} No · {nr_count} No Response")
+                    if st.session_state.get('photo_perm_csv') is None:
+                        # Excel no-permission list only: every student is either listed (declined) or not
+                        st.warning(f"📷 Photo Permissions: {no_count} declined (from Excel list) · {yes_count} not listed")
+                    else:
+                        st.warning(f"📷 Photo Permissions: {yes_count} Yes · {no_count} No · {nr_count} No Response")
                 else:
                     st.success(f"✅ Photo Permissions: All {yes_count} students have given permission")
                 _np_stats = st.session_state.get('photo_noperm_stats')
@@ -4852,6 +4856,8 @@ if t2 is not None:
                         }
 
                     swim_ability    = str(final_swimming_map.get(sid, "") or "").strip() or "Data not recorded"
+                    if opt_swimming and swim_ability == "Data not recorded":
+                        print(f"[swimming] no swimming data for {sid} {sname}, {pname}")
                     swim_color      = get_swimming_display_color(swim_ability)
                     dietary_req     = final_dietary_map.get(sid, "No data given")
                     photo_perm_val  = final_photo_perm_map.get(sid, None)
