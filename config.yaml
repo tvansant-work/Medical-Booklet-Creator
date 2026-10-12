@@ -54,3 +54,9 @@ swimming_file_mappings:
 dietary_file_mappings:
   student_name: "Student"  # Column containing student full name
   dietary_requirements: "Dietary Requirements"  # Column containing dietary info
+
+# Excel (.xlsx) list of students WITHOUT photo permission (uploaded in the Photo Permissions box)
+photo_permission_xlsx_mappings:
+  student_id: "ID"                      # Primary match: must equal the student list "Code" column
+  preferred_name: "StudentPreferred"    # Fallback match (only used if ID not found)
+  surname: "StudentSurname"             # Fallback match (only used if ID not found)

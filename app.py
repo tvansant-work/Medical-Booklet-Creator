@@ -2020,6 +2020,132 @@ def match_photo_permissions(df_main, photo_perm_csv):
         print(traceback.format_exc())
         return {}
 
+def _norm_student_id(v):
+    """Normalise a student ID for comparison: strip spaces, drop a trailing '.0'
+    (Excel numbers read back as floats) and ignore leading zeros."""
+    s = str(v).strip()
+    if s.lower() in ('', 'nan', 'none'):
+        return ''
+    if re.fullmatch(r'\d+\.0+', s):
+        s = s.split('.')[0]
+    return s.lstrip('0') or '0'
+
+
+def read_no_photo_permission_xlsx(file_list):
+    """
+    Reads one or more 'students WITHOUT photo permission' Excel (.xlsx) exports
+    and combines them into a single DataFrame (all values as text).
+    Returns None if nothing could be read.
+    """
+    frames = []
+    for f in file_list or []:
+        try:
+            if hasattr(f, 'seek'):
+                f.seek(0)
+            df = pd.read_excel(f, dtype=str, engine='openpyxl').fillna("")
+            df.columns = [str(c).strip() for c in df.columns]
+            frames.append(df)
+        except Exception as e:
+            print(f"[read_no_photo_permission_xlsx] Could not read '{getattr(f, 'name', '?')}': {e}")
+            st.warning(f"Could not read '{getattr(f, 'name', 'file')}' as an Excel file: {e}")
+    if not frames:
+        return None
+    return pd.concat(frames, ignore_index=True)
+
+
+def apply_no_photo_permission_list(df_main, perm_map, noperm_df, default_result):
+    """
+    Applies a 'no photo permission' list (every student listed has NO permission)
+    to the students in df_main (the student list / medical folder).
+
+    Matching:
+      1. Student ID (primary) — configurable column, default 'ID'.
+      2. Fallback for rows whose ID isn't found: surname + first-or-preferred
+         name, only when that combination identifies exactly ONE student in
+         df_main.
+    Listed students who are not in df_main are ignored.
+
+    perm_map       – result from the CSV matcher ({} if no CSV was uploaded)
+    default_result – value for students not touched by either source
+                     ('Yes' when the list is the only source, because the list
+                     contains everyone WITHOUT permission; otherwise the CSV
+                     result is kept, falling back to 'No Response').
+    Listed students always become 'No'.
+    """
+    cfg = CONFIG.get('photo_permission_xlsx_mappings', {})
+    cols_lc = {str(c).strip().lower(): c for c in noperm_df.columns}
+
+    def _col(key, default):
+        return cols_lc.get(str(cfg.get(key, default)).strip().lower())
+
+    id_col   = _col('student_id', 'ID')
+    pref_col = _col('preferred_name', 'StudentPreferred')
+    sur_col  = _col('surname', 'StudentSurname')
+
+    result = {}
+    id_lookup, name_lookup = {}, {}
+    for _, row in df_main.iterrows():
+        sid = str(row[COLS['student_id']])
+        result[sid] = perm_map.get(sid, default_result)
+        nid = _norm_student_id(sid)
+        if nid:
+            id_lookup[nid] = sid
+        sur = _normalize_name_key(str(row[COLS['surname']])).lower()
+        for fn in (row.get(COLS['first_name'], ''), row.get(COLS['preferred_name'], '')):
+            fn = _normalize_name_key(str(fn)).lower()
+            if sur and fn and fn != 'nan':
+                name_lookup.setdefault((sur, fn), set()).add(sid)
+
+    matched, by_name, listed = set(), 0, 0
+    for _, row in noperm_df.iterrows():
+        nid = _norm_student_id(row.get(id_col, '')) if id_col else ''
+        pref = _normalize_name_key(str(row.get(pref_col, ''))).lower() if pref_col else ''
+        sur = _normalize_name_key(str(row.get(sur_col, ''))).lower() if sur_col else ''
+        if not nid and not (pref and sur):
+            continue  # blank row
+        listed += 1
+        sid = id_lookup.get(nid) if nid else None
+        if sid is None and pref and sur:
+            candidates = name_lookup.get((sur, pref), set())
+            if len(candidates) == 1:
+                sid = next(iter(candidates))
+                by_name += 1
+        if sid is not None:
+            matched.add(sid)
+
+    for sid in matched:
+        result[sid] = 'No'
+
+    st.session_state.photo_noperm_stats = {
+        'listed': listed, 'matched': len(matched), 'by_name': by_name,
+    }
+    print(f"[photo permissions] no-permission list: {listed} listed, "
+          f"{len(matched)} matched to student list ({by_name} by name fallback)")
+    return result
+
+
+def has_photo_permission_data():
+    """True if either a photo permission CSV or a no-permission Excel list is loaded."""
+    return (st.session_state.get('photo_perm_csv') is not None or
+            st.session_state.get('photo_noperm_df') is not None)
+
+
+def compute_photo_permissions(df_main):
+    """
+    Builds the final { student_id: 'Yes'|'No'|'No Response' } map from whichever
+    sources are loaded: the Paperly CSV(s), the no-permission Excel list, or both.
+    The Excel list always forces 'No' for students it contains.
+    """
+    csv_data = st.session_state.get('photo_perm_csv')
+    noperm   = st.session_state.get('photo_noperm_df')
+    perm_map = match_photo_permissions(df_main, csv_data) if csv_data is not None else {}
+    if noperm is not None:
+        perm_map = apply_no_photo_permission_list(
+            df_main, perm_map, noperm,
+            default_result='Yes' if csv_data is None else 'No Response')
+    return perm_map
+
+
 def parse_learning_support(text):
     if not isinstance(text, str) or not text.strip(): return {} 
 
@@ -3620,11 +3746,13 @@ if t1 is not None:
     with col_e:
         st.markdown("""
         <div class="upload-card optional">
-          <div class="upload-card-label">Photo Permissions CSV</div>
-          <div class="upload-card-desc">Adds photo permission status to each profile and generates a no-permission list. You can upload multiple files — they'll be combined automatically.</div>
+          <div class="upload-card-label">Photo Permissions (CSV or Excel)</div>
+          <div class="upload-card-desc">Adds photo permission status to each profile and generates a no-permission list. Upload either (or both): <strong>Paperly CSV</strong> responses, and/or an <strong>Excel (.xlsx) list of students WITHOUT photo permission</strong> (matched by Student ID — only students in your student list are used). You can upload multiple files — they'll be combined automatically.</div>
         </div>
         """, unsafe_allow_html=True)
-        photo_perm_csv_files = st.file_uploader("Photo Permissions CSV", type="csv", label_visibility="collapsed", accept_multiple_files=True)
+        photo_perm_uploads = st.file_uploader("Photo Permissions (CSV or Excel)", type=["csv", "xlsx"], label_visibility="collapsed", accept_multiple_files=True)
+        photo_perm_csv_files  = [f for f in (photo_perm_uploads or []) if f.name.lower().endswith('.csv')]
+        photo_perm_xlsx_files = [f for f in (photo_perm_uploads or []) if f.name.lower().endswith('.xlsx')]
 
     with col_f:
         st.markdown("""
@@ -3739,6 +3867,14 @@ if t1 is not None:
             label = f"{n} file{'s' if n > 1 else ''} combined" if n > 1 else "1 file"
             st.success(f"✅ Photo permissions CSV loaded ({label})")
 
+    if photo_perm_xlsx_files:
+        noperm_df = read_no_photo_permission_xlsx(photo_perm_xlsx_files)
+        if noperm_df is not None:
+            st.session_state.photo_noperm_df = noperm_df
+            n = len(photo_perm_xlsx_files)
+            label = f"{n} files combined" if n > 1 else "1 file"
+            st.success(f"✅ No-photo-permission Excel list loaded ({label}, {len(noperm_df)} rows)")
+
     if camp_med_csv_files:
         collated = collate_csvs(camp_med_csv_files)
         if collated:
@@ -3805,8 +3941,8 @@ if t2 is not None:
                     st.session_state.dietary_unmatched = dietary_unmatched
                     st.session_state.dietary_manual_selections = {}
 
-                if 'photo_perm_csv' in st.session_state:
-                    perm_map = match_photo_permissions(df_final, st.session_state.photo_perm_csv)
+                if has_photo_permission_data():
+                    perm_map = compute_photo_permissions(df_final)
                     st.session_state.photo_permissions_map = perm_map
 
                 if 'camp_med_csv' in st.session_state:
@@ -3964,7 +4100,7 @@ if t2 is not None:
                 st.success(f"✅ All {len(_sc_matched)} contact records matched automatically")
 
             # Photo permissions summary
-            if 'photo_perm_csv' in st.session_state:
+            if has_photo_permission_data():
                 perm_map = st.session_state.get('photo_permissions_map', {})
                 no_count = sum(1 for v in perm_map.values() if v == 'No')
                 nr_count = sum(1 for v in perm_map.values() if v == 'No Response')
@@ -3973,6 +4109,13 @@ if t2 is not None:
                     st.warning(f"📷 Photo Permissions: {yes_count} Yes · {no_count} No · {nr_count} No Response")
                 else:
                     st.success(f"✅ Photo Permissions: All {yes_count} students have given permission")
+                _np_stats = st.session_state.get('photo_noperm_stats')
+                if _np_stats and st.session_state.get('photo_noperm_df') is not None:
+                    _by_name = f" ({_np_stats['by_name']} matched by name)" if _np_stats['by_name'] else ""
+                    st.caption(
+                        f"📷 No-permission Excel list: {_np_stats['matched']} of {_np_stats['listed']} "
+                        f"listed students are in this student list and marked No{_by_name}."
+                    )
 
             # Camp medications matching status
             if 'camp_med_csv' in st.session_state:
@@ -4226,7 +4369,7 @@ if t2 is not None:
 
                 has_swimming   = 'swimming_csv' in st.session_state
                 has_dietary    = 'dietary_csv' in st.session_state
-                has_photo_perm = 'photo_perm_csv' in st.session_state
+                has_photo_perm = has_photo_permission_data()
 
                 if has_swimming or has_dietary or has_photo_perm:
                     st.markdown("---")
@@ -4487,8 +4630,8 @@ if t2 is not None:
                 # Re-run photo permissions matching at generate time so it always
                 # uses the latest session state (e.g. Excursion PDF guardian data
                 # that may have been uploaded after the last "Scan & Match Photos" run).
-                if 'photo_perm_csv' in st.session_state:
-                    final_photo_perm_map = match_photo_permissions(df_final, st.session_state.photo_perm_csv)
+                if has_photo_permission_data():
+                    final_photo_perm_map = compute_photo_permissions(df_final)
                     st.session_state.photo_permissions_map = final_photo_perm_map
                 else:
                     final_photo_perm_map = st.session_state.get('photo_permissions_map', {}).copy()
