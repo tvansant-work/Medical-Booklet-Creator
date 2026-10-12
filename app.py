@@ -591,6 +591,35 @@ def parse_medical_text(text):
         })
     return parsed_conditions
 
+def detect_medical_flags(parsed_med, raw_med):
+    """
+    Decides which Quick Overview symbols (asthma / allergy / anaphylaxis) a
+    student gets.
+
+    Only the condition NAME and SEVERITY of each parsed condition are searched
+    - not the free-text description - so a note such as "no known allergy" or
+    "allergy action plan attached" under an Anaphylaxis condition can't create
+    an Allergy symbol. Patterns are stems so spelling variants all match:
+        asthma      -> asth...            (Asthma, Asthmatic)
+        allergy     -> allerg... / hay fever / hayfever
+                       (Allergy, Allergies, Allergic - the old test looked for
+                        the exact word "allergy", which never matches "Allergies")
+        anaphylaxis -> anaph...           (Anaphylaxis, Anaphylactic, Anaphalaxis)
+    If the medical notes could not be split into named conditions (only a
+    free-text "General Medical Note"), the whole text is searched instead.
+    """
+    named = [c for c in (parsed_med or []) if c.get('name') != 'General Medical Note']
+    if named:
+        haystack = ' '.join(f"{c.get('name', '')} {c.get('severity', '')}" for c in named)
+    else:
+        haystack = raw_med or ''
+    h = haystack.lower()
+    return {
+        'asthma':      re.search(r'asth', h) is not None,
+        'allergy':     re.search(r'allerg|hay\s*-?fever', h) is not None,
+        'anaphylaxis': re.search(r'anaph', h) is not None,
+    }
+
 def parse_doctors(text):
     """Parses doctor info into a structured list with map links."""
     if not isinstance(text, str) or not text.strip(): return []
@@ -4050,6 +4079,17 @@ if t2 is not None:
                 else:
                     st.success(f"✅ All {total_swim_matched} swimming records matched automatically")
 
+                # Students in the student list with NO swimming record (after manual matches)
+                _swim_have = set(st.session_state.get('swimming_matched', {}).keys())
+                _swim_have.update(st.session_state.get('swimming_manual_selections', {}).values())
+                _swim_missing = [sid for sid in id_to_name_map if sid not in _swim_have]
+                if _swim_missing:
+                    with st.expander(f"⚠️  {len(_swim_missing)} students have no swimming data", expanded=False):
+                        st.caption("These students will show \"Data not recorded\" on their profile and a "
+                                   "\"No swimming data\" symbol in the Quick Overview.")
+                        for _sid in _swim_missing:
+                            st.markdown(f"- {id_to_name_map[_sid]}")
+
             # Dietary
             if 'dietary_csv' in st.session_state:
                 total_diet_matched = len(st.session_state.get('dietary_matched', {}))
@@ -4793,7 +4833,10 @@ if t2 is not None:
                     if sid in st.session_state.attachments:
                         for f in st.session_state.attachments[sid]: embedded.extend(convert_file_to_images(f))
 
-                    med_l = raw_med.lower()
+                    med_flags = detect_medical_flags(parsed_med, raw_med)
+                    print(f"[quick overview flags] {sid} {sname}, {pname}: "
+                          f"{[k for k, v in med_flags.items() if v] or 'none'} "
+                          f"<- conditions: {[c['name'] for c in parsed_med] or 'none'}")
 
                     def _home_contact_display(idx):
                         contacts = parsed_home.get('contacts') if parsed_home else None
@@ -4808,7 +4851,7 @@ if t2 is not None:
                             "link": phone.get('link')
                         }
 
-                    swim_ability    = final_swimming_map.get(sid, "Data not recorded")
+                    swim_ability    = str(final_swimming_map.get(sid, "") or "").strip() or "Data not recorded"
                     swim_color      = get_swimming_display_color(swim_ability)
                     dietary_req     = final_dietary_map.get(sid, "No data given")
                     photo_perm_val  = final_photo_perm_map.get(sid, None)
@@ -4832,12 +4875,13 @@ if t2 is not None:
                         "gender": gender,
                         "home_contact_1": _home_contact_display(0),
                         "home_contact_2": _home_contact_display(1),
-                        "asthma": "asthma" in med_l,
-                        "allergy": "allergy" in med_l, "anaphylaxis": "anaphylaxis" in med_l,
+                        "asthma": med_flags['asthma'],
+                        "allergy": med_flags['allergy'], "anaphylaxis": med_flags['anaphylaxis'],
                         "family_alert": bool(family_alert),
                         "photo_perm": photo_perm_val,
                         "swim_weak": "weak swimmer" in swim_ability.lower(),
                         "swim_cannot": "cannot swim" in swim_ability.lower(),
+                        "swim_none": swim_ability.lower() == "data not recorded",
                         "swimming": swim_ability, "swim_color": swim_color
                     }
                     medical_obj = None
