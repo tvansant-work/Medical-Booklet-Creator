@@ -76,11 +76,6 @@
     a { text-decoration: none; color: inherit; } 
 
     /* COVER */
-    .y9-cover-info { margin: 18px auto 10px auto; padding: 10px 14px; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; text-align: center; }
-    .y9-cover-info .y9-week { font-size: 11pt; color: #444; margin-bottom: 8px; }
-    .y9-cover-info .y9-leaders-label { font-size: 8pt; text-transform: uppercase; letter-spacing: 1px; color: #777; }
-    .y9-cover-info .y9-leaders { font-size: 15pt; font-weight: bold; color: #1a3a5c; margin-top: 2px; }
-    .y9-cover-info .y9-notes { font-size: 10pt; color: #c62828; font-weight: bold; margin-top: 8px; }
     .cover { text-align: center; margin-top: 35%; border: 4px solid #c62828; padding: 30px; }
     .conf { color: #c62828; font-weight: bold; margin-top: 20px; text-transform: uppercase; letter-spacing: 1px; }
 
@@ -335,14 +330,6 @@
 
     <div class="cover">
         <h1>{{ title }}</h1>
-        {% if y9_group %}
-        <div class="y9-cover-info">
-            <div class="y9-week">{{ y9_group.week_label }}{% if y9_group.week_detail %}: {{ y9_group.week_detail }}{% endif %}</div>
-            <div class="y9-leaders-label">Group leaders</div>
-            <div class="y9-leaders">{% if y9_group.leaders %}{{ y9_group.leaders | join('  ·  ') }}{% else %}Not listed{% endif %}</div>
-            {% if y9_group.notes %}<div class="y9-notes">{{ y9_group.notes | join(' · ') }}</div>{% endif %}
-        </div>
-        {% endif %}
         <p>Generated {{ date }}</p>
         <div class="conf">CONFIDENTIAL – Destroy securely after use</div>
     </div>
@@ -427,8 +414,9 @@
        Rendered only when y8_camp_group is passed (Freycinet or Bay of Fires).
        Sits between the photo index and the dietary / medical overview pages.
     ════════════════════════════════════════════════════════════════ #}
-    {% if y8_camp_group %}
+    {% if y8_camp_group or y9_group %}
     <style>
+        .badge-y9 { background: #6a1b9a; color: white; }
         .camp-summary-table {
             width: 100%;
             border-collapse: collapse;
@@ -569,7 +557,9 @@
 
     <div class="camp-summary-heading">
         Camp Leader Summary
-        {%- if y8_camp_group == 'Freycinet' %}
+        {%- if y9_group %}
+            <span class="camp-badge badge-y9">Y9 &middot; {{ y9_group.week_label }} &middot; {{ y9_group.title }}</span>
+        {%- elif y8_camp_group == 'Freycinet' %}
             <span class="camp-badge badge-freycinet">FREYCINET</span>
         {%- else %}
             <span class="camp-badge badge-bof">BAY OF FIRES</span>
@@ -588,7 +578,50 @@
         All scores are student self-assessments from the pre-camp survey (scale 1–10). Scores of 1–2 are highlighted as potential areas needing extra leader attention; 3–4 indicate some concern; 5 is moderate. Columns are grouped: <em>camp activities</em> (left) then <em>general readiness</em> (right, separated by a darker border).
     </div>
 
-    {% if y8_camp_group == 'Freycinet' %}
+    {% if y9_group %}
+    {# ── Y9 TABLE ─────────────────────────────────────────────────────────────
+       Activity columns:  White Water · Challenge
+       General columns:   Camping · Outdoors · Swimming · Overnighter ·
+                          Hardship · Gear · Teamwork
+       Every student in the group gets a row; students with no survey
+       response show dashes.
+    #}
+    <table class="camp-summary-table">
+        <thead>
+            <tr>
+                <th class="name-col" style="width:18%;">Name</th>
+                <th style="width:7%;"><span class="th-short">White Water</span><span class="th-full">Excitement: white water session</span></th>
+                <th style="width:7%;"><span class="th-short">Challenge</span><span class="th-full">Preferred level of physical challenge</span></th>
+                <th class="col-divider" style="width:7%;"><span class="th-short">Camping</span><span class="th-full">General camping skills</span></th>
+                <th style="width:8%;"><span class="th-short">Outdoors</span><span class="th-full">Comfort: outdoors/bugs/toilets</span></th>
+                <th style="width:7%;"><span class="th-short">Swimming</span><span class="th-full">Confidence: deep water</span></th>
+                <th style="width:8%;"><span class="th-short">Overnighter</span><span class="th-full">Excitement: overnight hike</span></th>
+                <th style="width:8%;"><span class="th-short">Hardship</span><span class="th-full">Response when activity gets tough</span></th>
+                <th style="width:8%;"><span class="th-short">Gear</span><span class="th-full">Gear &amp; packing independence</span></th>
+                <th style="width:8%;"><span class="th-short">Teamwork</span><span class="th-full">Group teamwork &amp; inclusion</span></th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for s in students %}
+            {% set y = s.y9_scores or {} %}
+            <tr class="no-break">
+                <td class="name-cell">{{ s.preferred }} {{ s.last }}</td>
+                {{ score_cell(y['White Water']) }}
+                {{ score_cell(y['Challenge']) }}
+                {{ score_cell(y['Camping'], 'col-divider') }}
+                {{ score_cell(y['Outdoors']) }}
+                {{ score_cell(y['Swimming']) }}
+                {{ score_cell(y['Overnighter']) }}
+                {{ score_cell(y['Hardship']) }}
+                {{ score_cell(y['Gear']) }}
+                {{ score_cell(y['Teamwork']) }}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <p style="font-size:7pt;color:#777;">– = no survey response recorded for this student.</p>
+
+    {% elif y8_camp_group == 'Freycinet' %}
     {# ── FREYCINET TABLE ──────────────────────────────────────────────────────
        Activity columns:  Sea Kayak · Coasteer
        General columns:   Gen Camping · Outdoors/Bugs · Swimming · Overnighter ·

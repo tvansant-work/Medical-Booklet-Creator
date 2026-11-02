@@ -4405,6 +4405,35 @@ if t1 is not None:
             label = f"{n} file{'s' if n > 1 else ''} combined" if n > 1 else "1 file"
             st.success(f"✅ Camp medications CSV loaded ({label})")
 
+    # ── Y9 camp survey (1–10 ratings) ─────────────────────────────────────────
+    if y9_survey_file is not None:
+        if "df_final" not in st.session_state:
+            st.warning("Upload the Student List CSV at the same time as the Y9 survey so students can be matched.")
+        else:
+            _y9s_sig = (getattr(y9_survey_file, "file_id", y9_survey_file.name), len(st.session_state.df_final))
+            if st.session_state.get("_y9_survey_sig") != _y9s_sig:
+                try:
+                    with st.spinner("Parsing and matching Y9 survey…"):
+                        _y9_recs, _y9_info = parse_y9_survey_csv(y9_survey_file)
+                        _y9_m, _y9_u, _y9_stats = match_y9_survey(_y9_recs, st.session_state.df_final)
+                    st.session_state.y9_survey_matched   = _y9_m
+                    st.session_state.y9_survey_unmatched = _y9_u
+                    st.session_state.y9_survey_manual    = {}
+                    st.session_state.y9_survey_missing   = _y9_info.get("missing", [])
+                    st.session_state._y9_survey_sig      = _y9s_sig
+                except Exception as _e:
+                    st.error(f"Could not read Y9 survey file: {_e}")
+    _y9_sm = st.session_state.get("y9_survey_matched") or {}
+    _y9_su = st.session_state.get("y9_survey_unmatched") or []
+    if _y9_sm or _y9_su:
+        if _y9_su:
+            st.warning(f"⚠️ Y9 survey: {len(_y9_sm)} students matched · {len(_y9_su)} need manual matching in the Process tab")
+        else:
+            st.success(f"✅ Y9 survey: all {len(_y9_sm)} students matched")
+        if st.session_state.get("y9_survey_missing"):
+            st.warning("Couldn't find these survey questions (those columns will show '–'): "
+                       + ", ".join(st.session_state.y9_survey_missing))
+
     if photos:
         path = os.path.join(TEMP_DIR, "photos.pdf")
         with open(path, "wb") as f: f.write(photos.getbuffer())
@@ -4677,6 +4706,32 @@ if t2 is not None:
                             st.divider()
                 elif camp_matched_st:
                     st.success(f"✅ Camp Medications: {len(camp_matched_st)} student(s) with medication matched automatically")
+
+            # Y9 survey manual matching
+            _y9_sm_st = st.session_state.get('y9_survey_matched', {})
+            _y9_su_st = st.session_state.get('y9_survey_unmatched', [])
+            if _y9_su_st:
+                with st.expander(f"⚠️  {len(_y9_su_st)} Y9 survey response(s) need manual matching  ({len(_y9_sm_st)} matched automatically)", expanded=True):
+                    st.caption("These survey responses couldn't be matched to a student with certainty. Pick the correct student, or leave as (Skip) to leave them out.")
+                    for _it in _y9_su_st:
+                        _yk = _it['_index']
+                        _c1, _c2 = st.columns([2, 3])
+                        with _c1:
+                            st.markdown(f"**Survey name:** {_it.get('name') or '(blank)'}")
+                            _meta = " · ".join(x for x in [_it.get('email'), _it.get('house')] if x)
+                            if _meta:
+                                st.caption(_meta)
+                            if _it.get('_suggest'):
+                                st.caption(f"💡 Possible match: {_it['_suggest']['label']}")
+                        with _c2:
+                            _sel = st.selectbox("Assign to student:", options=student_options, key=f"y9_sel_{_yk}")
+                            if _sel != "(Skip)":
+                                st.session_state.y9_survey_manual[_yk] = name_to_id_map[_sel]
+                            elif _yk in st.session_state.y9_survey_manual:
+                                del st.session_state.y9_survey_manual[_yk]
+                        st.divider()
+            elif _y9_sm_st:
+                st.success(f"✅ Y9 Survey: {len(_y9_sm_st)} student(s) matched automatically")
 
             # ── Step 3: Medical plans ─────────────────────────────────────────────
             st.markdown('<div class="section-head">Step 3 — Medical action plans</div>', unsafe_allow_html=True)
@@ -5173,6 +5228,7 @@ if t2 is not None:
                 final_photo_map = st.session_state.auto_matches.copy()
                 for p, s in st.session_state.manual_selections.items(): final_photo_map[s] = p
 
+                final_y9_scores = build_y9_final_scores()
                 final_swimming_map = st.session_state.get('swimming_matched', {}).copy()
                 if st.session_state.get('swimming_manual_selections'):
                     for swim_idx, student_id in st.session_state.swimming_manual_selections.items():
@@ -5392,7 +5448,9 @@ if t2 is not None:
                         "photo": img_to_base64(final_photo_map.get(sid)),
                         "sections": sections, "attachments": embedded,
                         # Y8 camp survey data — None when not a camp booklet
-                        "y8_camp": st.session_state.get("y8_camp_data", {}).get(sid, None)
+                        "y8_camp": st.session_state.get("y8_camp_data", {}).get(sid, None),
+                        # Y9 camp survey scores {label: '1'-'10'/'N/A'} — None when no survey response
+                        "y9_scores": final_y9_scores.get(_norm_student_id(sid))
                     }
                     matrix_obj = {
                         "id": sid, "link_id": link_id, "name": f"{sname}, {pname}",
