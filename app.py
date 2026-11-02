@@ -4298,6 +4298,41 @@ if t1 is not None:
             "Y9 Camp Groups CSV", type="csv", label_visibility="collapsed",
             key=f"y9_groups_uploader_{_y9_ver}")
 
+    # Parse the groups file once per upload. As with Y8, there is deliberately no auto-clear when the
+    # uploader is empty (the Setup tab isn't rendered while on another tab) — use "Clear Y9 camp data".
+    if y9_groups_file is not None:
+        _y9g_file_id = getattr(y9_groups_file, "file_id", y9_groups_file.name)
+        if st.session_state.get("_y9_groups_file_id") != _y9g_file_id:
+            try:
+                with st.spinner("Parsing Y9 camp groups…"):
+                    _y9g_parsed = parse_y9_groups_csv(y9_groups_file)
+                if _y9g_parsed["groups"] and _y9g_parsed["id_to_group"]:
+                    st.session_state.y9_groups_data = _y9g_parsed
+                    st.session_state._y9_groups_file_id = _y9g_file_id
+                else:
+                    st.session_state.y9_groups_data = None
+                    st.error("No groups or student IDs were found in the Y9 groups file. Each week needs a header "
+                             "row of '<group name>, ID' column pairs with the student IDs listed underneath.")
+            except Exception as _e:
+                st.session_state.y9_groups_data = None
+                st.error(f"Could not parse Y9 camp groups file: {_e}")
+
+    _y9g_loaded = st.session_state.get("y9_groups_data")
+    if _y9g_loaded:
+        _y9g_weeks = list(dict.fromkeys(g["week_label"] for g in _y9g_loaded["groups"]))
+        st.success(f"✅ Y9 camp groups loaded — {len(_y9g_loaded['groups'])} groups across "
+                   f"{len(_y9g_weeks)} week(s), {len(_y9g_loaded['id_to_group'])} students")
+        for _w in _y9g_loaded.get("warnings", []):
+            st.warning(_w)
+        if st.button("🗑️ Clear Y9 camp data", key="y9_clear_btn"):
+            st.session_state.y9_groups_data = None
+            st.session_state.y9_survey_matched = {}
+            st.session_state.y9_survey_unmatched = []
+            st.session_state.y9_survey_manual = {}
+            st.session_state.pop("_y9_groups_file_id", None)
+            st.session_state._y9_uploader_ver = _y9_ver + 1
+            st.rerun()
+
     # ── File processing ────────────────────────────────────────────────────────
     if csv:
         df_temp = pd.read_csv(csv).fillna("")
@@ -4920,6 +4955,8 @@ if t2 is not None:
                 ]
                 if st.session_state.get("y8_camp_data"):
                     _sort_options.append("🏕️ Y8 Preloaded Camp Groups")
+                if (st.session_state.get("y9_groups_data") or {}).get("groups"):
+                    _sort_options.append(_Y9_SORT_LABEL)
                 sort_by = st.selectbox("Sort students by:", _sort_options)
             with col4:
                 if sort_by == "Alphabetical (Surname)":
@@ -4932,8 +4969,31 @@ if t2 is not None:
                         "Output:",
                         ["12 Separate PDFs (One for each Class/Camp)", "1 Master PDF"]
                     )
+                elif sort_by == _Y9_SORT_LABEL:
+                    output_mode = st.radio(
+                        "Output:",
+                        ["Separate PDFs — one per group (ZIP)", "1 Master PDF (all groups, in file order)"]
+                    )
                 else:
                     output_mode = st.radio("Output:", ["Single Document", f"Split by {sort_by}"])
+
+            if sort_by == _Y9_SORT_LABEL:
+                _y9d_ui = st.session_state.get("y9_groups_data") or {}
+                _y9_map_ui = _y9d_ui.get("id_to_group", {})
+                _id_col_ui = COLS.get('student_id', 'Code')
+                _list_ids_ui = {_norm_student_id(v): i for i, v in df_final[_id_col_ui].items()} \
+                    if _id_col_ui in df_final.columns else {}
+                _in_groups = [n for n in _list_ids_ui if n in _y9_map_ui]
+                _not_in_groups = [n for n in _list_ids_ui if n not in _y9_map_ui]
+                _not_in_list = [n for n in _y9_map_ui if n not in _list_ids_ui]
+                st.caption(f"🏔️ {len(_in_groups)} of {len(_list_ids_ui)} students in the Student List are in a Y9 camp group.")
+                if _not_in_list:
+                    st.warning(f"{len(_not_in_list)} student ID(s) in the groups file were not found in the Student List "
+                               f"and will be skipped: {', '.join(sorted(_not_in_list)[:20])}"
+                               f"{' …' if len(_not_in_list) > 20 else ''}")
+                if _not_in_groups and _in_groups:
+                    st.caption(f"ℹ️ {len(_not_in_groups)} student(s) in the Student List aren't in any group "
+                               f"and won't be included (e.g. other year levels).")
 
             # ── Custom Groups builder (only shown when Custom Groups is selected) ──
             if sort_by == "Custom Groups":
@@ -5521,6 +5581,57 @@ if t2 is not None:
                             file_name="Y8_Camp_Medical_Booklet_Master.pdf", mime="application/pdf"
                         )
 
+                elif sort_by == _Y9_SORT_LABEL:
+                    # One booklet per group in the Y9 groups file (file order: week, then group).
+                    _y9d = st.session_state.get("y9_groups_data") or {}
+                    _y9_map = _y9d.get("id_to_group", {})
+                    _y9_by_key = {}
+                    for rec in all_records:
+                        gk = _y9_map.get(_norm_student_id(rec['profile']['id']))
+                        if gk:
+                            _y9_by_key.setdefault(gk, []).append(rec)
+                    y9_groups = [
+                        (g, sorted(_y9_by_key[g['key']], key=lambda r: r['sort_keys']['alpha']))
+                        for g in _y9d.get("groups", []) if g['key'] in _y9_by_key
+                    ]
+
+                    if not y9_groups:
+                        status.update(label="⚠️ No students matched Y9 camp groups", state="error", expanded=False)
+                        st.warning(
+                            "No students could be matched to the Y9 camp groups. "
+                            "Check that the IDs in the groups file match the Code column in the Student List CSV."
+                        )
+                    elif "Separate" in output_mode:
+                        _prog_placeholder.empty()
+                        status.write("Generating separate Y9 group PDFs…")
+                        zip_buffer = BytesIO()
+                        with zipfile.ZipFile(zip_buffer, "w") as zf:
+                            for _i, (g, g_recs) in enumerate(y9_groups, 1):
+                                pdf_data = render_subset(g_recs, title_suffix=f"— {g['week_label']}: {g['title']}")
+                                safe_name = re.sub(r'[^a-zA-Z0-9]+', '_', f"{g['week_label']} {g['title']}").strip('_')
+                                zf.writestr(f"{_i:02d}_Medical_Booklet_{safe_name}.pdf", pdf_data)
+                        status.update(label="✅ All Y9 group booklets ready", state="complete", expanded=False)
+                        st.download_button(
+                            "⬇ Download Y9 Group Booklets (ZIP)", data=zip_buffer.getvalue(),
+                            file_name="Y9_Camp_Medical_Booklets.zip", mime="application/zip"
+                        )
+                    else:
+                        _prog_placeholder.empty()
+                        status.write("Generating master Y9 camp PDF…")
+                        writer = PdfWriter()
+                        for g, g_recs in y9_groups:
+                            pdf_data = render_subset(g_recs, title_suffix=f"— {g['week_label']}: {g['title']}")
+                            reader = PdfReader(BytesIO(pdf_data))
+                            for page in reader.pages:
+                                writer.add_page(page)
+                        combined_buf = BytesIO()
+                        writer.write(combined_buf)
+                        status.update(label="✅ Master Y9 camp booklet ready", state="complete", expanded=False)
+                        st.download_button(
+                            "⬇ Download Master Y9 Camp Booklet", data=combined_buf.getvalue(),
+                            file_name="Y9_Camp_Medical_Booklet_Master.pdf", mime="application/pdf"
+                        )
+
                 elif sort_by == "Roll Group":
                     all_records.sort(key=lambda x: (str(x['sort_keys']['roll']), x['sort_keys']['alpha']))
                     group_key = 'roll'
@@ -5534,7 +5645,7 @@ if t2 is not None:
                     all_records.sort(key=lambda x: x['sort_keys']['alpha'])
                     group_key = 'alpha'
 
-                if sort_by not in ("Custom Groups", "🏕️ Y8 Preloaded Camp Groups"):
+                if sort_by not in ("Custom Groups", "🏕️ Y8 Preloaded Camp Groups", _Y9_SORT_LABEL):
                     if "Split" in output_mode:
                         _prog_placeholder.empty()
                         status.write("Generating split PDFs…")
