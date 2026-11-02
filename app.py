@@ -470,6 +470,145 @@ def auto_download_plan(url, session_cookie, cookie_name="ASP.NET_SessionId"):
         return None, None, f"Unexpected error: {e}"
 
 
+# ---------------------------------------------------------------------------
+# Action-plan bulk export / import
+# Saved file names look like:  12345__Smith_Jane__01_Anaphylaxis.pdf
+#   <student ID>__<Surname>_<First>__<plan number>_<condition>.<ext>
+# The student ID is what links a file back to its student on import; the rest is
+# for humans (and as a fallback if someone renames a file and drops the ID).
+# ---------------------------------------------------------------------------
+_PLAN_EXTS = (".pdf", ".png", ".jpg", ".jpeg")
+PLAN_FOLDER_NAME = "Action_Plans"
+
+
+def _plan_slug(text, maxlen=40):
+    s = unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode("ascii")
+    s = re.sub(r"[^A-Za-z0-9]+", "-", s).strip("-")
+    return s[:maxlen].strip("-") or "Plan"
+
+
+def _plan_norm(text):
+    return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode("ascii").lower())
+
+
+def build_plan_filename(sid, surname, first, number, condition, original_name):
+    ext = os.path.splitext(str(original_name or ""))[1].lower()
+    if ext not in _PLAN_EXTS:
+        ext = ".pdf"
+    sid_part = re.sub(r"[^A-Za-z0-9-]", "", str(sid))
+    return f"{sid_part}__{_plan_slug(surname)}_{_plan_slug(first)}__{int(number):02d}_{_plan_slug(condition)}{ext}"
+
+
+def build_plans_zip(entries, id_to_sf):
+    """entries: [(sid, number, condition, bytes, original_name)] -> ZIP bytes containing an Action_Plans/ folder."""
+    buf = BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for sid, number, condition, data, orig in entries:
+            surname, first = id_to_sf.get(str(sid), ("", ""))
+            zf.writestr(f"{PLAN_FOLDER_NAME}/{build_plan_filename(sid, surname, first, number, condition, orig)}", data)
+    return buf.getvalue()
+
+
+def expand_plan_uploads(uploaded):
+    """
+    uploaded: [(name, bytes)] straight from the file uploader (loose files and/or ZIPs).
+    Returns (files [(basename, bytes)], skipped [names]). ZIPs are opened; junk/hidden files and
+    unsupported types are skipped.
+    """
+    files, skipped = [], []
+
+    def _ok(base):
+        return not base.startswith(".") and not base.startswith("~$") and os.path.splitext(base)[1].lower() in _PLAN_EXTS
+
+    for name, data in uploaded:
+        base = os.path.basename(str(name))
+        if base.lower().endswith(".zip"):
+            try:
+                with zipfile.ZipFile(BytesIO(data)) as zf:
+                    for info in zf.infolist():
+                        inner = info.filename
+                        b = os.path.basename(inner)
+                        if info.is_dir() or "__MACOSX" in inner or not b:
+                            continue
+                        if _ok(b):
+                            files.append((b, zf.read(info)))
+                        else:
+                            skipped.append(b)
+            except Exception:
+                skipped.append(base)
+        elif _ok(base):
+            files.append((base, data))
+        else:
+            skipped.append(base)
+    return files, skipped
+
+
+def link_imported_plan_files(files, detected, df, occupied=None):
+    """
+    Work out which student (and which plan slot) each saved file belongs to.
+      1. the student ID before the first '__' in the file name
+      2. any token in the file name that is a known student ID
+      3. the student's name appearing in the file name (only if it identifies exactly one student)
+    Slot: a detected plan whose condition matches the name -> else first empty slot -> else None
+    (None = an extra plan; it's still added to that student's booklet).
+    Returns (assignments [{name,data,sid,slot,condition}], unmatched [names])
+    """
+    occupied = set(occupied or [])
+    known, name_keys = {}, {}
+    for _, row in df.iterrows():
+        sid = str(row[COLS["student_id"]]).strip()
+        sur = row[COLS["surname"]]
+        first = row[COLS["first_name"]]
+        pref = row.get(COLS.get("preferred_name", "Preferred name"), "")
+        known[sid] = True
+        for f in {_plan_norm(first), _plan_norm(pref)} - {""}:
+            for k in (_plan_norm(sur) + f, f + _plan_norm(sur)):
+                name_keys.setdefault(k, set()).add(sid)
+
+    assignments, unmatched, claimed = [], [], set()
+    for name, data in files:
+        stem = os.path.splitext(name)[0]
+        parts = stem.split("__")
+        sid = parts[0].strip() if parts[0].strip() in known else None
+        if sid is None:
+            hits = {t for t in re.split(r"[^A-Za-z0-9]+", stem) if t in known}
+            if len(hits) == 1:
+                sid = hits.pop()
+        if sid is None:
+            ns = _plan_norm(stem)
+            hits = {s for k, ss in name_keys.items() if k and k in ns for s in ss}
+            if len(hits) == 1:
+                sid = hits.pop()
+        if sid is None:
+            unmatched.append(name)
+            continue
+
+        cond = ""
+        if len(parts) >= 3:
+            m = re.match(r"^\d+_(.*)$", parts[2])
+            cond = m.group(1) if m else parts[2]
+        nc = _plan_norm(cond)
+
+        plans = detected.get(sid, [])
+        slot = None
+        if nc:
+            for i, p in enumerate(plans):
+                npc = _plan_norm(p.get("condition"))
+                if (sid, i) not in claimed and npc and (npc == nc or npc.startswith(nc) or nc.startswith(npc)):
+                    slot = i
+                    break
+        if slot is None:
+            for i in range(len(plans)):
+                if (sid, i) not in claimed and f"{sid}_{i}" not in occupied:
+                    slot = i
+                    break
+        if slot is not None:
+            claimed.add((sid, slot))
+        assignments.append({"name": name, "data": data, "sid": sid, "slot": slot,
+                            "condition": plans[slot]["condition"] if slot is not None else cond.replace("-", " ")})
+    return assignments, unmatched
+
+
 def detect_medical_plans(df):
     """
     Parses 'Medical notes' to find 'Action or medical plan links' and URLs.
@@ -4740,7 +4879,7 @@ if t2 is not None:
 
             # ── Advanced Options (session cookie + auto-download) ─────────────────
             if detected:
-                with st.expander("⚙️ Advanced Options — Auto-download plans"):
+                with st.expander("⚙️ Advanced Options — Bulk download / import plans"):
                     st.markdown("**Auto-download all plans using your portal session**")
                     st.caption(
                         "This uses your existing browser login to download action plans automatically. "
@@ -4851,6 +4990,116 @@ if t2 is not None:
                             if successes:
                                 st.rerun()
 
+                    # ── Save plans as a folder / import saved plans ───────────────
+                    st.divider()
+                    _id_to_sf = {str(r[COLS['student_id']]): (r[COLS['surname']], r[COLS['first_name']])
+                                 for _, r in df_final.iterrows()}
+
+                    # Everything currently held: manual uploads take priority over auto-downloads
+                    # (same order as booklet generation).
+                    _held = []
+                    _auto_f = st.session_state.get("auto_downloaded_plan_files", {})
+                    _man_f  = st.session_state.get("manual_plan_uploads", {})
+                    for _sid, _plans in detected.items():
+                        for _i, _pl in enumerate(_plans):
+                            _src = _man_f.get(f"{_sid}_{_i}") or _auto_f.get(f"{_sid}_{_i}")
+                            if _src and _src[0]:
+                                _held.append((_sid, _i + 1, _pl['condition'], _src[0], _src[1]))
+                    _extra_n = {_s: len(_p) for _s, _p in detected.items()}
+                    for _e in st.session_state.get("manual_plans_store", []):
+                        try:
+                            _e['file'].seek(0)
+                            _raw = _e['file'].read()
+                            _e['file'].seek(0)
+                        except Exception:
+                            _raw = b""
+                        if _raw:
+                            _extra_n[_e['sid']] = _extra_n.get(_e['sid'], 0) + 1
+                            _held.append((_e['sid'], _extra_n[_e['sid']], "Extra plan", _raw,
+                                          getattr(_e['file'], 'name', 'plan.pdf')))
+
+                    st.markdown("**📦 Save plans as a folder**")
+                    if _held:
+                        st.caption(
+                            f"{len(_held)} plan file(s) are loaded. This saves them in a ZIP containing an "
+                            f"`{PLAN_FOLDER_NAME}` folder, each file named with the student's ID and name "
+                            f"(e.g. `12345__Smith_Jane__01_Anaphylaxis.pdf`). Unzip it and keep the folder — "
+                            f"you can drop it back in below next time instead of downloading from the portal."
+                        )
+                        st.download_button(
+                            f"⬇ Download {len(_held)} action plan(s) (ZIP folder)",
+                            data=build_plans_zip(_held, _id_to_sf),
+                            file_name=f"{PLAN_FOLDER_NAME}_{datetime.now().strftime('%Y-%m-%d')}.zip",
+                            mime="application/zip",
+                            key="plans_zip_download",
+                        )
+                    else:
+                        st.caption("Nothing to save yet — auto-download the plans above (or upload some) first.")
+
+                    st.divider()
+                    st.markdown("**📂 Import saved plans** (alternative to downloading from the portal)")
+                    st.caption(
+                        "Drag in the whole saved folder, all the files inside it, or the ZIP. Files are linked to students "
+                        "automatically using the student ID in each file name (falling back to the student's name). "
+                        "PDF, PNG and JPG files are accepted."
+                    )
+                    if "_plan_import_reset" not in st.session_state:
+                        st.session_state._plan_import_reset = 0
+                    _imp_files = st.file_uploader(
+                        "Saved action plans",
+                        type=['pdf', 'png', 'jpg', 'jpeg', 'zip'],
+                        accept_multiple_files=True,
+                        key=f"plan_import_{st.session_state._plan_import_reset}",
+                    )
+                    if _imp_files and st.button(f"Link {len(_imp_files)} file(s) to students", type="primary", key="plan_import_btn"):
+                        _files, _skipped = expand_plan_uploads([(f.name, f.getvalue()) for f in _imp_files])
+                        _occupied = {k for k, v in _auto_f.items() if v and v[0]} | {k for k, v in _man_f.items() if v and v[0]}
+                        _assign, _unmatched = link_imported_plan_files(_files, detected, df_final, _occupied)
+                        _linked, _extras = 0, 0
+                        for _a in _assign:
+                            if _a['slot'] is not None:
+                                _k = f"{_a['sid']}_{_a['slot']}"
+                                st.session_state.auto_downloaded_plan_files[_k] = (_a['data'], _a['name'])
+                                st.session_state.auto_downloaded_plans[_k] = {
+                                    "filename": _a['name'], "sid": _a['sid'],
+                                    "condition": _a['condition'], "source": "import"}
+                                st.session_state.manual_plan_uploads.pop(_k, None)  # imported file wins
+                                _linked += 1
+                            else:
+                                _dup = False
+                                for _e in st.session_state.manual_plans_store:
+                                    if _e['sid'] == _a['sid'] and getattr(_e['file'], 'name', '') == _a['name'] \
+                                            and _e['file'].getbuffer().nbytes == len(_a['data']):
+                                        _dup = True
+                                        break
+                                if not _dup:
+                                    _b = BytesIO(_a['data'])
+                                    _b.name = _a['name']
+                                    st.session_state.manual_plans_store.append({
+                                        'sid': _a['sid'], 'name': id_to_name_map.get(_a['sid'], _a['sid']), 'file': _b})
+                                    _extras += 1
+                        st.session_state._plan_import_report = {
+                            "linked": _linked, "extras": _extras, "unmatched": _unmatched, "skipped": _skipped,
+                            "students": len({a['sid'] for a in _assign}),
+                        }
+                        st.session_state._plan_import_reset += 1
+                        st.rerun()
+
+                    _rep = st.session_state.get("_plan_import_report")
+                    if _rep:
+                        _tot = _rep['linked'] + _rep['extras']
+                        if _tot:
+                            st.success(f"✅ Linked {_tot} file(s) to {_rep['students']} student(s)"
+                                       + (f" ({_rep['extras']} added as extra plans)" if _rep['extras'] else ""))
+                        if _rep['unmatched']:
+                            st.warning(f"{len(_rep['unmatched'])} file(s) couldn't be linked to a student — "
+                                       "check the student ID is at the start of the name, or add them under "
+                                       "'Add a plan manually': " + ", ".join(_rep['unmatched'][:15])
+                                       + (" …" if len(_rep['unmatched']) > 15 else ""))
+                        if _rep['skipped']:
+                            st.caption(f"Ignored {len(_rep['skipped'])} unsupported file(s): "
+                                       + ", ".join(_rep['skipped'][:10]) + (" …" if len(_rep['skipped']) > 10 else ""))
+
             # ── Per-student plan list ─────────────────────────────────────────────
             if "manual_plan_uploads" not in st.session_state:
                 st.session_state.manual_plan_uploads = {}
@@ -4869,7 +5118,7 @@ if t2 is not None:
                                 plan_key = f"{sid}_{p_idx}"
                                 ad = st.session_state.get("auto_downloaded_plans", {}).get(plan_key)
                                 if ad:
-                                    st.caption(f"✅ Auto-downloaded: {ad['filename']}")
+                                    st.caption(f"✅ {'Imported' if ad.get('source') == 'import' else 'Auto-downloaded'}: {ad['filename']}")
                                 elif st.session_state.manual_plan_uploads.get(plan_key):
                                     fname = st.session_state.manual_plan_uploads[plan_key][1]
                                     st.caption(f"✅ Uploaded: {fname}")
@@ -4878,7 +5127,7 @@ if t2 is not None:
                                 existing_key = f"plan_upload_{sid}_{p_idx}"
                                 plan_key = f"{sid}_{p_idx}"
                                 if st.session_state.get("auto_downloaded_plans", {}).get(plan_key):
-                                    upload_label = f"Replace {plan['condition']} (auto-downloaded)"
+                                    upload_label = f"Replace {plan['condition']} ({'imported' if st.session_state['auto_downloaded_plans'][plan_key].get('source') == 'import' else 'auto-downloaded'})"
                                 uploaded = st.file_uploader(upload_label, type=['pdf','png','jpg'], key=existing_key)
                                 # Cache uploaded file as raw bytes so it survives button-click reruns.
                                 # Only update the cache when a file is actually present — never clear it.
