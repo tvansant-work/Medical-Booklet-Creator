@@ -202,6 +202,14 @@ if 'custom_groups_ungrouped_checked' not in st.session_state:
     st.session_state.custom_groups_ungrouped_checked = False
 if 'y8_camp_data' not in st.session_state:
     st.session_state.y8_camp_data = {}  # { student_id: { 'class': '8A', 'camp': 'Freycinet', ...survey cols... } }
+if 'y9_groups_data' not in st.session_state:
+    st.session_state.y9_groups_data = None  # { 'groups': [...], 'id_to_group': {norm_id: group_key}, 'warnings': [...] }
+if 'y9_survey_matched' not in st.session_state:
+    st.session_state.y9_survey_matched = {}  # { student_id: {'name','email','house','timestamp','scores':{label: '1'-'10'/'N/A'}} }
+if 'y9_survey_unmatched' not in st.session_state:
+    st.session_state.y9_survey_unmatched = []  # [ {..survey record.., '_index': int, '_suggest': {...} or None} ]
+if 'y9_survey_manual' not in st.session_state:
+    st.session_state.y9_survey_manual = {}  # { _index: student_id }
 if 'camp_medication_matched' not in st.session_state:
     st.session_state.camp_medication_matched = {}  # { student_id: { 'name': str, 'medications': [str] } }
 if 'camp_medication_unmatched' not in st.session_state:
@@ -2388,6 +2396,414 @@ def parse_y8_camp_excel(uploaded_file):
     return result
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Y9 CAMP — survey (1–10 ratings) + group allocation files
+#
+#  * Survey CSV : one row per student submission. Columns are found by KEYWORD in
+#                 the (long) question text, so small wording changes don't break
+#                 anything. Keywords can be overridden in config.yaml under
+#                 `y9_camp_mappings`.
+#  * Groups CSV : a "Week N: …" banner row, then a header row of <group name>, ID
+#                 column pairs, then the student IDs under each ID column, then
+#                 (after a blank row) optional notes and finally the leaders.
+# ─────────────────────────────────────────────────────────────────────────────
+_Y9_SORT_LABEL = "🏔️ Y9 Preloaded Camp Groups"
+
+# Order here is just the order the keys exist; the booklet template decides the
+# column order. Labels must match the names used in templates/profiles.html.
+_Y9_SCORE_LABELS = ["White Water", "Challenge", "Camping", "Outdoors", "Swimming",
+                    "Overnighter", "Hardship", "Gear", "Teamwork"]
+
+_Y9_DEFAULT_MAPPINGS = {
+    "timestamp_keyword": "timestamp",
+    "email_keyword": "email",
+    "name_keyword": "full name",
+    "house_keyword": "which house",
+    # booklet column  ->  text that must appear in the survey question (case-insensitive)
+    "score_keywords": {
+        "White Water": "white water",
+        "Challenge":   "physical challenge would you prefer",
+        "Camping":     "general camping skills",
+        "Outdoors":    "sleeping outdoors",
+        "Swimming":    "swimming in deep water",
+        "Overnighter": "overnight hike",
+        "Hardship":    "gets tiring",
+        "Gear":        "organising your own gear",
+        "Teamwork":    "work together",
+    },
+}
+
+
+def _y9_cfg():
+    """Default Y9 survey mappings, overridden by config.yaml -> y9_camp_mappings if present."""
+    cfg = {k: (dict(v) if isinstance(v, dict) else v) for k, v in _Y9_DEFAULT_MAPPINGS.items()}
+    user = CONFIG.get("y9_camp_mappings") or {}
+    for k, v in user.items():
+        if k == "score_keywords" and isinstance(v, dict):
+            cfg["score_keywords"].update({str(a): str(b) for a, b in v.items() if b})
+        elif v:
+            cfg[k] = str(v)
+    return cfg
+
+
+def _y9_read_text(file_obj):
+    """Read an uploaded CSV as text, tolerating Excel's UTF-8-with-BOM and Windows-1252 (en/em dashes)."""
+    if hasattr(file_obj, "seek"):
+        file_obj.seek(0)
+    raw = file_obj.read()
+    if isinstance(raw, str):
+        return raw
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1")
+
+
+def _y9_assign_text_blocks(cols, blocks):
+    """
+    Under each week, text rows are grouped into blocks separated by blank rows.
+    The LAST block is the leaders; any earlier block(s) are per-group notes
+    (e.g. "KAYAK First" / "Walk First"). Values sit in each group's name column.
+    """
+    if not cols or not blocks:
+        return
+    leader_rows = blocks[-1]
+    note_rows = [row for blk in blocks[:-1] for row in blk]
+    for c in cols:
+        nc = c["name_col"]
+        c["group"]["leaders"] = [row[nc] for row in leader_rows if row[nc]]
+        c["group"]["notes"]   = [row[nc] for row in note_rows if row[nc]]
+
+
+def parse_y9_groups_csv(file_obj):
+    """
+    Parse the Y9 camp groups file.
+
+    Returns {
+      'groups': [ {key, week_label, week_detail, title, journey, ids, leaders, notes}, ... ]  (file order)
+      'id_to_group': { normalised student id: group key },
+      'warnings': [str]
+    }
+    """
+    import csv, io
+    text = _y9_read_text(file_obj)
+    rows = [[(c or "").strip() for c in r] for r in csv.reader(io.StringIO(text))]
+    width = max((len(r) for r in rows), default=0)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+
+    week_re = re.compile(r'^\s*(week\s*\d+)\s*[:\-–—]?\s*(.*)$', re.IGNORECASE)
+    groups, warnings = [], []
+    week_label, week_detail = "Groups", ""
+    cols, blocks, cur_block = None, [], []
+
+    for r in rows:
+        m = week_re.match(r[0]) if r and r[0] else None
+        if m and not any(r[1:]):
+            # A new "Week N: …" banner — finish the previous week first.
+            if cur_block:
+                blocks.append(cur_block)
+            _y9_assign_text_blocks(cols, blocks)
+            week_label = re.sub(r"\s+", " ", m.group(1)).title()
+            week_detail = m.group(2).strip()
+            cols, blocks, cur_block = None, [], []
+            continue
+
+        if cols is None:
+            # Looking for this week's header row: <group name>, ID, <group name>, ID, …
+            id_cells = [i for i, c in enumerate(r) if c.lower() in ("id", "student id", "code")]
+            if id_cells:
+                cols = []
+                for i in id_cells:
+                    title = r[i - 1] if i > 0 else ""
+                    if not title:
+                        continue
+                    title = re.sub(r"\s*[—–]\s*", " — ", title).strip()
+                    journey = re.split(r"\s+—\s+|\s+-\s+", title)[0].strip()
+                    g = {"key": f"{week_label} | {title}", "week_label": week_label,
+                         "week_detail": week_detail, "title": title, "journey": journey,
+                         "ids": [], "leaders": [], "notes": []}
+                    groups.append(g)
+                    cols.append({"name_col": i - 1, "id_col": i, "group": g})
+            continue
+
+        found_id = False
+        for c in cols:
+            v = r[c["id_col"]]
+            if re.fullmatch(r"\d+(?:\.0+)?", v):
+                c["group"]["ids"].append(v.split(".")[0])
+                found_id = True
+        if found_id:
+            if cur_block:
+                blocks.append(cur_block)
+                cur_block = []
+            continue
+        if not any(r):
+            if cur_block:
+                blocks.append(cur_block)
+                cur_block = []
+            continue
+        cur_block.append(r)
+
+    if cur_block:
+        blocks.append(cur_block)
+    _y9_assign_text_blocks(cols, blocks)
+
+    id_to_group = {}
+    for g in groups:
+        for gid in g["ids"]:
+            nid = _norm_student_id(gid)
+            if nid in id_to_group and id_to_group[nid] != g["key"]:
+                warnings.append(f"Student ID {gid} is listed in more than one group "
+                                f"({id_to_group[nid]} and {g['key']}) — the first one is used.")
+            else:
+                id_to_group[nid] = g["key"]
+
+    return {"groups": groups, "id_to_group": id_to_group, "warnings": warnings}
+
+
+def _y9_score(v):
+    """'7' / '7.0' -> '7'; anything blank or outside 1–10 -> 'N/A'."""
+    try:
+        n = int(round(float(str(v).strip())))
+    except (ValueError, TypeError):
+        return "N/A"
+    return str(n) if 1 <= n <= 10 else "N/A"
+
+
+def parse_y9_survey_csv(file_obj):
+    """
+    Parse the Y9 camp survey export.
+    Returns (records, info). Each record:
+        {'name','email','house','timestamp','scores':{label: '1'..'10'|'N/A'}, '_index'}
+    info = {'missing': [score labels whose question could not be found], 'rows': int}
+    """
+    import io
+    cfg = _y9_cfg()
+    df = pd.read_csv(io.StringIO(_y9_read_text(file_obj)), dtype=str, keep_default_na=False)
+    heads = {c: re.sub(r"\s+", " ", str(c)).strip().lower() for c in df.columns}
+    used = set()
+
+    def _find(keyword):
+        kw = str(keyword).strip().lower()
+        if not kw:
+            return None
+        for c, h in heads.items():
+            if c not in used and kw in h:
+                used.add(c)
+                return c
+        return None
+
+    ts_col    = _find(cfg["timestamp_keyword"])
+    email_col = _find(cfg["email_keyword"])
+    name_col  = _find(cfg["name_keyword"])
+    house_col = _find(cfg["house_keyword"])
+    score_cols = {lab: _find(cfg["score_keywords"].get(lab, "")) for lab in _Y9_SCORE_LABELS}
+
+    if ts_col:
+        ts = pd.to_datetime(df[ts_col], format="%d/%m/%Y %H:%M:%S", errors="coerce")
+        if ts.isna().any():
+            ts = ts.fillna(pd.to_datetime(df[ts_col], dayfirst=True, errors="coerce"))
+    else:
+        ts = pd.Series([pd.NaT] * len(df), index=df.index)
+
+    records = []
+    for idx, row in df.iterrows():
+        scores = {lab: (_y9_score(row[col]) if col else "N/A") for lab, col in score_cols.items()}
+        if all(v == "N/A" for v in scores.values()):
+            continue
+        records.append({
+            "name":      str(row[name_col]).strip()  if name_col  else "",
+            "email":     str(row[email_col]).strip() if email_col else "",
+            "house":     str(row[house_col]).strip() if house_col else "",
+            "timestamp": ts.loc[idx],
+            "scores":    scores,
+            "_index":    int(idx),
+        })
+
+    missing = [lab for lab, col in score_cols.items() if col is None]
+    return records, {"missing": missing, "rows": len(df)}
+
+
+def _y9_norm_name(s):
+    """Lower-case, accent-free, punctuation-free name so 'Tran-Lau' == 'tran lau' and "O'Brien" == 'obrien'."""
+    s = unicodedata.normalize("NFKD", str(s or "")).encode("ascii", "ignore").decode("ascii").lower()
+    s = s.replace("'", "")
+    return re.sub(r"[^a-z0-9]+", " ", s).strip()
+
+
+def _y9_ts(rec):
+    ts = rec.get("timestamp")
+    return ts if ts is not None and pd.notna(ts) else pd.Timestamp.min
+
+
+def _y9_student_index(df):
+    id_col = COLS["student_id"]
+    fn_col = COLS["first_name"]
+    pn_col = COLS.get("preferred_name", "Preferred name")
+    sn_col = COLS["surname"]
+    hs_col = COLS.get("house", "House")
+
+    email_col = None
+    for cand in ["Email", "email", "Email address", "Email Address",
+                 "Student email", "Student Email", "EmailAddress"]:
+        if cand in df.columns:
+            email_col = cand
+            break
+    if email_col is None:
+        email_col = next((c for c in df.columns if "email" in str(c).lower()), None)
+
+    students = []
+    for _, r in df.iterrows():
+        sid = str(r.get(id_col, "")).strip()
+        first = _y9_norm_name(r.get(fn_col, ""))
+        pref = _y9_norm_name(r.get(pn_col, "")) or first
+        sur = _y9_norm_name(r.get(sn_col, ""))
+        if not sid or not sur:
+            continue
+        names = set()
+        for f in {first, pref}:
+            if f:
+                names.add(f"{f} {sur}")
+                names.add(f"{sur} {f}")
+        students.append({
+            "sid": sid,
+            "house": _y9_norm_name(r.get(hs_col, "")),
+            "email": str(r.get(email_col, "")).strip().lower() if email_col else "",
+            "names": names,
+            "tokens": set(first.split()) | set(pref.split()) | set(sur.split()),
+            "sur_tokens": set(sur.split()),
+            "first_toks": set(first.split()[:1]) | set(pref.split()[:1]),
+            "label": f"{str(r.get(fn_col, '')).strip()} {str(r.get(sn_col, '')).strip()} ({sid})",
+        })
+    return students
+
+
+def _y9_pick(cands, house):
+    """One candidate -> that one. Several -> narrow by House if that leaves exactly one. Otherwise None."""
+    if len(cands) == 1:
+        return cands[0]
+    if house:
+        narrowed = [c for c in cands if c["house"] == house]
+        if len(narrowed) == 1:
+            return narrowed[0]
+    return None
+
+
+def _y9_match_one(rec, students, by_email, by_name):
+    """
+    Returns (student or None, suggestion or None).
+    Only unambiguous matches are accepted automatically; anything doubtful comes
+    back as a *suggestion* for the manual-matching list instead.
+    """
+    house = _y9_norm_name(rec.get("house", ""))
+
+    # 1) Email — most reliable
+    em = (rec.get("email") or "").strip().lower()
+    if em and len(by_email.get(em, [])) == 1:
+        return by_email[em][0], None
+
+    nm = _y9_norm_name(rec.get("name", ""))
+    if not nm:
+        return None, None
+
+    # 2) Exact full name (first OR preferred name + surname, either order)
+    cands = by_name.get(nm, [])
+    if cands:
+        hit = _y9_pick(cands, house)
+        return (hit, None) if hit else (None, cands[0])
+
+    # 3) Name contains / is contained in the student's name tokens (middle names etc.)
+    toks = set(nm.split())
+    if len(toks) >= 2:
+        cands = [s for s in students
+                 if (toks & s["sur_tokens"])
+                 and (toks <= s["tokens"] or (s["sur_tokens"] <= toks and (s["first_toks"] & toks)))]
+        if cands:
+            hit = _y9_pick(cands, house)
+            return (hit, None) if hit else (None, cands[0])
+
+    # 4) Typos — only auto-accept a very close, unambiguous hit
+    close = difflib.get_close_matches(nm, list(by_name.keys()), n=5, cutoff=0.75)
+    if not close:
+        return None, None
+    best = close[0]
+    best_students = by_name[best]
+    ratio = difflib.SequenceMatcher(None, nm, best).ratio()
+    best_sids = {s["sid"] for s in best_students}
+    rivals = {s["sid"] for v in close[1:]
+              if difflib.SequenceMatcher(None, nm, v).ratio() >= ratio - 0.05
+              for s in by_name[v]} - best_sids
+    if ratio >= 0.92 and len(best_students) == 1 and not rivals:
+        return best_students[0], None
+    return None, best_students[0]
+
+
+def match_y9_survey(records, df_students):
+    """
+    Match survey records to students in the student list (email → name → fuzzy).
+    If a student submitted more than once, the NEWEST submission wins.
+
+    Returns (matched {student_id: record}, unmatched [record + '_suggest'], stats)
+    """
+    students = _y9_student_index(df_students)
+    by_email, by_name = {}, {}
+    for s in students:
+        if s["email"]:
+            by_email.setdefault(s["email"], []).append(s)
+        for n in s["names"]:
+            by_name.setdefault(n, []).append(s)
+
+    newest, pending, n_dupes = {}, [], 0
+    for rec in records:
+        stu, sug = _y9_match_one(rec, students, by_email, by_name)
+        if stu is None:
+            r2 = dict(rec)
+            r2["_suggest"] = {"sid": sug["sid"], "label": sug["label"]} if sug else None
+            pending.append(r2)
+            continue
+        cur = newest.get(stu["sid"])
+        if cur is None:
+            newest[stu["sid"]] = rec
+        else:
+            n_dupes += 1
+            if _y9_ts(rec) >= _y9_ts(cur):
+                newest[stu["sid"]] = rec
+
+    # The same unmatched person may also have submitted twice — keep their newest.
+    keep = {}
+    for rec in pending:
+        key = (rec.get("email") or "").lower() or _y9_norm_name(rec.get("name", "")) or f"row{rec['_index']}"
+        cur = keep.get(key)
+        if cur is None:
+            keep[key] = rec
+        else:
+            n_dupes += 1
+            if _y9_ts(rec) >= _y9_ts(cur):
+                keep[key] = rec
+    unmatched = sorted(keep.values(), key=lambda r: r["_index"])
+
+    stats = {"responses": len(records), "matched": len(newest),
+             "unmatched": len(unmatched), "duplicates": n_dupes}
+    print(f"[Y9 survey] {stats['responses']} responses → {stats['matched']} matched, "
+          f"{stats['unmatched']} need manual matching, {stats['duplicates']} older duplicate(s) ignored")
+    return newest, unmatched, stats
+
+
+def build_y9_final_scores():
+    """{ normalised student id: scores dict } from automatic + manual survey matches."""
+    out = {}
+    for sid, rec in (st.session_state.get("y9_survey_matched") or {}).items():
+        out[_norm_student_id(sid)] = rec["scores"]
+    pending = {u["_index"]: u for u in (st.session_state.get("y9_survey_unmatched") or [])}
+    for idx, sid in (st.session_state.get("y9_survey_manual") or {}).items():
+        rec = pending.get(idx)
+        if rec:
+            out[_norm_student_id(sid)] = rec["scores"]
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Ligature / unknown-glyph map.
 # The FB-block entries are standard Unicode ligatures.
@@ -3848,6 +4264,39 @@ if t1 is not None:
         _classes = sorted(set(v['class'] for v in _y8.values()))
         _camps   = sorted(set(v['camp']  for v in _y8.values()))
         st.caption(f"🏕️ Loaded: classes {', '.join(_classes)}  ·  camps: {', '.join(_camps)}")
+
+    # ── Y9 Camp Data (optional) ────────────────────────────────────────────────
+    st.markdown('<div class="section-head">Optional — Y9 Camp Data</div>', unsafe_allow_html=True)
+    # Bumping this number gives the two uploaders new keys, which empties them ("Clear Y9 camp data").
+    _y9_ver = st.session_state.get("_y9_uploader_ver", 0)
+    _y9_c1, _y9_c2 = st.columns(2)
+    with _y9_c1:
+        st.markdown("""
+        <div class="upload-card optional">
+          <div class="upload-card-label">🏔️ Y9 Camp Survey (CSV)</div>
+          <div class="upload-card-desc">
+            The student survey export with the 1–10 ratings. Adds a <strong>Camp Leader Summary</strong>
+            page to each group's booklet. Students are matched by email, then by name — upload the
+            Student List CSV at the same time.
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+        y9_survey_file = st.file_uploader(
+            "Y9 Camp Survey CSV", type="csv", label_visibility="collapsed",
+            key=f"y9_survey_uploader_{_y9_ver}")
+    with _y9_c2:
+        st.markdown("""
+        <div class="upload-card optional">
+          <div class="upload-card-label">🏔️ Y9 Camp Groups (CSV)</div>
+          <div class="upload-card-desc">
+            The week-by-week group allocation (student IDs, leaders and notes for each group). Enables the
+            <strong>Y9 Preloaded Camp Groups</strong> sort option — one booklet per group.
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+        y9_groups_file = st.file_uploader(
+            "Y9 Camp Groups CSV", type="csv", label_visibility="collapsed",
+            key=f"y9_groups_uploader_{_y9_ver}")
 
     # ── File processing ────────────────────────────────────────────────────────
     if csv:
