@@ -179,7 +179,7 @@ if 'dietary_manual_selections' not in st.session_state:
 if 'photo_permissions_map' not in st.session_state:
     st.session_state.photo_permissions_map = {} # Stores { 'student_id': 'Yes'|'No'|'No Response' }
 if 'active_feature' not in st.session_state:
-    st.session_state.active_feature = None  # None | 'booklet' | 'group'
+    st.session_state.active_feature = None  # None | 'booklet' | 'group' | 'attachments'
 if 'group_results' not in st.session_state:
     st.session_state.group_results = None  # Stores last ID Matcher results
 if 'group_email_input' not in st.session_state:
@@ -3988,7 +3988,8 @@ st.markdown("""
   /* ── Feature selection cards — full-card clickable buttons ── */
   /* Target via :has() on the column that contains the unique marker span */
   [data-testid="stColumn"]:has(#fc-booklet-marker) [data-testid="stBaseButton-secondary"] > button,
-  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button {
+  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button,
+  [data-testid="stColumn"]:has(#fc-attach-marker) [data-testid="stBaseButton-secondary"] > button {
     all: unset !important;
     display: block !important;
     width: 100% !important;
@@ -4008,12 +4009,14 @@ st.markdown("""
     letter-spacing: 0 !important;
   }
   [data-testid="stColumn"]:has(#fc-booklet-marker) [data-testid="stBaseButton-secondary"] > button p,
-  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button p {
+  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button p,
+  [data-testid="stColumn"]:has(#fc-attach-marker) [data-testid="stBaseButton-secondary"] > button p {
     margin: 0 !important;
     padding: 0 !important;
   }
   [data-testid="stColumn"]:has(#fc-booklet-marker) [data-testid="stBaseButton-secondary"] > button:hover,
-  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button:hover {
+  [data-testid="stColumn"]:has(#fc-group-marker) [data-testid="stBaseButton-secondary"] > button:hover,
+  [data-testid="stColumn"]:has(#fc-attach-marker) [data-testid="stBaseButton-secondary"] > button:hover {
     border-color: #1a7f6e !important;
     box-shadow: 0 6px 24px rgba(26,127,110,0.13) !important;
     transform: translateY(-3px) !important;
@@ -4355,17 +4358,22 @@ if _active_feature == "booklet":
     _tab_labels = ["  🏠 Home  ", "  📋 Booklet Setup  ", "  ⚙️ Process & Generate  "]
     _tabs = st.tabs(_tab_labels)
     t0, t1, t2 = _tabs
-    t3 = None
+    t3 = t4 = None
 elif _active_feature == "group":
     _tab_labels = ["  🏠 Home  ", "  🔗 ID Matcher  "]
     _tabs = st.tabs(_tab_labels)
     t0, t3 = _tabs
-    t1 = t2 = None
+    t1 = t2 = t4 = None
+elif _active_feature == "attachments":
+    _tab_labels = ["  🏠 Home  ", "  📎 Attachment Downloader  "]
+    _tabs = st.tabs(_tab_labels)
+    t0, t4 = _tabs
+    t1 = t2 = t3 = None
 else:
     _tab_labels = ["  🏠 Home  "]
     _tabs = st.tabs(_tab_labels)
     t0 = _tabs[0]
-    t1 = t2 = t3 = None
+    t1 = t2 = t3 = t4 = None
 
 # ── Auto-tab-switch helper (injected as a hidden iframe via st.components) ────
 def _inject_tab_click(tab_index):
@@ -4401,6 +4409,11 @@ if st.session_state.get("_go_group"):
     st.session_state._go_group = False
     _inject_tab_click(1)
 
+# Auto-switch: → Attachment Downloader tab (index 1 when feature=attachments)
+if st.session_state.get("_go_attach"):
+    st.session_state._go_attach = False
+    _inject_tab_click(1)
+
 # Auto-switch: → Process & Generate tab (index 2 when feature=booklet)
 if st.session_state.get("_active_tab") == 1:
     st.session_state._active_tab = None
@@ -4415,7 +4428,7 @@ with t0:
     st.markdown("Choose a tool below to get started.")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    home_col1, home_col2 = st.columns(2)
+    home_col1, home_col2, home_col3 = st.columns(3)
 
     with home_col1:
         # Hidden marker lets CSS target and style this column's button as a card
@@ -4439,6 +4452,17 @@ with t0:
         ):
             st.session_state.active_feature = 'group'
             st.session_state._go_group = True
+            st.rerun()
+
+    with home_col3:
+        st.markdown('<span id="fc-attach-marker" style="display:none"></span>', unsafe_allow_html=True)
+        if st.button(
+            "📎\n\n**Attachment Downloader**\n\nDownload every student's medical action plan from the portal and save them as a folder, named by student. Only needs the Student List CSV.",
+            use_container_width=True,
+            key="home_attach_btn"
+        ):
+            st.session_state.active_feature = 'attachments'
+            st.session_state._go_attach = True
             st.rerun()
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -6931,6 +6955,244 @@ if t3 is not None:
             st.session_state.group_results = None
             st.session_state.group_email_input = ""
             st.rerun()
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# TAB 4 — ATTACHMENT DOWNLOADER
+# Student List CSV only -> download every action plan from the portal -> save as a folder (ZIP).
+# Uses the same download / clean-up / naming functions as Step 3 of the Booklet Creator.
+# ═══════════════════════════════════════════════════════════════════════════════
+if t4 is not None:
+ with t4:
+
+    st.markdown('<div class="section-head">Attachment Downloader</div>', unsafe_allow_html=True)
+    st.markdown(
+        "Download every student's medical action plan from the portal in one go and save them as a folder, "
+        "each file named with the student's ID and name. All you need is the Student List CSV. "
+        "The saved folder can be dropped into the Medical Booklet Creator later (Step 3 → Advanced Options → Import saved plans)."
+    )
+
+    # ── Step 1: Student List CSV ──────────────────────────────────────────────
+    st.markdown('<div class="section-head">Step 1 — Student List CSV</div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div class="upload-card">
+      <div class="upload-card-label">Student List CSV</div>
+      <div class="upload-card-desc">Student data from Seqta — the action plan links are read from the medical notes.
+      <br><a class="seqta-link" href="{SEQTA_URL}" target="_blank" style="margin-top:6px;display:inline-flex">↗ Open in Seqta</a></div>
+    </div>
+    """, unsafe_allow_html=True)
+    att_csv = st.file_uploader("Student List CSV for attachment downloader", type="csv",
+                               label_visibility="collapsed", key="att_csv_uploader")
+
+    att_df = None
+    if att_csv is not None:
+        try:
+            att_df = pd.read_csv(att_csv, dtype=str).fillna("")
+        except Exception as _e:
+            st.error(f"Could not read that CSV: {_e}")
+    elif "df_final" in st.session_state:
+        att_df = st.session_state.df_final
+        st.caption("💡 A student list is already loaded from the Booklet Creator — it will be used if no file is uploaded here.")
+
+    if att_df is not None:
+        _need = [COLS['student_id'], COLS['surname'], COLS['first_name'], COLS['medical_notes']]
+        _missing = [c for c in _need if c not in att_df.columns]
+        if _missing:
+            st.error("This CSV is missing the expected column(s): " + ", ".join(f"'{c}'" for c in _missing)
+                     + ". Make sure it's the Student List export from Seqta.")
+            att_df = None
+
+    if att_df is None:
+        st.info("Upload the Student List CSV to get started.")
+    else:
+        att_detected = detect_medical_plans(att_df)
+        _att_id_to_sf   = {str(r[COLS['student_id']]): (r[COLS['surname']], r[COLS['first_name']])
+                           for _, r in att_df.iterrows()}
+        _att_id_to_name = {s: f"{f} {sn}" for s, (sn, f) in _att_id_to_sf.items()}
+
+        # Flat task list, in student-name order. Plan numbers match the Booklet Creator's slots.
+        att_tasks = []
+        for _sid in sorted(att_detected, key=lambda s: (_att_id_to_sf.get(s, ("", ""))[0].lower(),
+                                                         _att_id_to_sf.get(s, ("", ""))[1].lower())):
+            for _i, _pl in enumerate(att_detected[_sid]):
+                att_tasks.append({"key": f"{_sid}_{_i}", "sid": _sid, "idx": _i,
+                                  "condition": _pl.get("condition") or "Action plan",
+                                  "url": _pl.get("url"), "name": _att_id_to_name.get(_sid, _sid)})
+        _task_by_key = {t["key"]: t for t in att_tasks}
+
+        for _k, _d in (("att_files", {}), ("att_errors", {}), ("att_manual", {})):
+            if _k not in st.session_state:
+                st.session_state[_k] = _d
+
+        if not att_tasks:
+            st.warning("No action plans were found in this student list's medical notes.")
+        else:
+            _n_students = len({t["sid"] for t in att_tasks})
+            st.success(f"✅ {len(att_tasks)} action plan(s) found for {_n_students} student(s) "
+                       f"out of {len(att_df)} in the list.")
+
+            # ── Step 2: portal session ─────────────────────────────────────────
+            st.markdown('<div class="section-head">Step 2 — Portal session</div>', unsafe_allow_html=True)
+            _host = CONFIG['app_settings'].get('school_portal_url', '')
+            _domain = _host.replace("https://", "").replace("http://", "").split("/")[0]
+            with st.expander("How to get your session cookie"):
+                st.markdown(f"""
+1. Log into [{_domain}]({_host}) in Chrome or Safari as normal
+2. Press **F12** to open DevTools (or right-click anywhere → **Inspect**)
+3. Click the **Application** tab (Chrome) or **Storage** tab (Safari)
+4. In the left panel: **Cookies** → click `{_domain}`
+5. Find the cookie named **`ASP.NET_SessionId`** (or `SEQTASESSION`)
+6. Click it and copy the **Value** column
+7. Paste it below
+""")
+                st.info("💡 The cookie expires when you log out of the portal. If downloads fail, log back in and copy a fresh value. "
+                        "Your credentials are never stored — only the temporary session value is used.", icon="ℹ️")
+            _cc1, _cc2 = st.columns([3, 1])
+            with _cc1:
+                att_cookie = st.text_input("Session cookie value", value=st.session_state.get("_portal_cookie", ""),
+                                           type="password", placeholder="Paste cookie value here…",
+                                           key="att_cookie_input")
+            with _cc2:
+                att_cookie_name = st.text_input("Cookie name", value=st.session_state.get("_portal_cookie_name", "ASP.NET_SessionId"),
+                                                key="att_cookie_name_input") or "ASP.NET_SessionId"
+            if att_cookie:
+                st.session_state["_portal_cookie"] = att_cookie
+                st.session_state["_portal_cookie_name"] = att_cookie_name
+
+            # ── Step 3: download ───────────────────────────────────────────────
+            st.markdown('<div class="section-head">Step 3 — Download</div>', unsafe_allow_html=True)
+
+            def _att_run(tasks):
+                """Download the given tasks (4 at a time), recording files and per-plan errors."""
+                from concurrent.futures import ThreadPoolExecutor, as_completed
+
+                def _fetch(t):
+                    fobj, fname, err = auto_download_plan(t["url"], att_cookie, cookie_name=att_cookie_name)
+                    return t["key"], (fobj.getvalue() if fobj else None), fname, err
+
+                todo = []
+                for t in tasks:
+                    if not t["url"]:
+                        st.session_state.att_errors[t["key"]] = "No download link in the student data"
+                    else:
+                        todo.append(t)
+                if not todo:
+                    return True
+
+                # Probe one first: an expired/incorrect cookie would fail everything, so stop early.
+                bar = st.progress(0, text="Checking your portal session…")
+                k0, b0, f0, e0 = _fetch(todo[0])
+                if b0 is None and e0 and ("cookie" in e0.lower() or "login" in e0.lower()):
+                    bar.empty()
+                    st.error(f"❌ {e0} Log back into the portal, copy a fresh cookie value above, and try again.")
+                    return False
+                results = [(k0, b0, f0, e0)]
+                done = 1
+                bar.progress(done / len(todo), text=f"Downloading… {done} of {len(todo)}")
+                with ThreadPoolExecutor(max_workers=4) as ex:
+                    futs = [ex.submit(_fetch, t) for t in todo[1:]]
+                    for fu in as_completed(futs):
+                        results.append(fu.result())
+                        done += 1
+                        bar.progress(done / len(todo), text=f"Downloading… {done} of {len(todo)}")
+                bar.empty()
+                for k, data, fname, err in results:
+                    if data:
+                        st.session_state.att_files[k] = (data, fname)
+                        st.session_state.att_errors.pop(k, None)
+                    else:
+                        st.session_state.att_errors[k] = err or "Unknown error"
+                st.session_state.pop("att_zip_cache", None)
+                return True
+
+            def _att_have(k):
+                return k in st.session_state.att_manual or k in st.session_state.att_files
+
+            _pending = [t for t in att_tasks if not _att_have(t["key"])]
+            _retry   = [t for t in att_tasks if t["key"] in st.session_state.att_errors and not _att_have(t["key"])]
+            _b1, _b2, _b3 = st.columns([2, 2, 1])
+            with _b1:
+                if not att_cookie:
+                    st.button(f"⬇ Download all {len(att_tasks)} plan(s)", disabled=True,
+                              help="Paste your session cookie above first", key="att_dl_all_disabled")
+                elif st.button(f"⬇ Download all {len(att_tasks)} plan(s)", type="primary", key="att_dl_all"):
+                    st.session_state.att_errors = {}
+                    if _att_run([t for t in att_tasks if not st.session_state.att_manual.get(t["key"])]):
+                        st.session_state.att_ran = True
+                        st.rerun()
+            with _b2:
+                if att_cookie and _retry and st.button(f"🔄 Retry {len(_retry)} failed", key="att_retry"):
+                    if _att_run(_retry):
+                        st.rerun()
+            with _b3:
+                if st.button("↩ Clear", key="att_clear"):
+                    for _k in ("att_files", "att_errors", "att_manual", "att_ran", "att_zip_cache"):
+                        st.session_state.pop(_k, None)
+                    st.rerun()
+
+            # ── Results ────────────────────────────────────────────────────────
+            if st.session_state.get("att_ran"):
+                _held = []
+                for t in att_tasks:
+                    src = st.session_state.att_manual.get(t["key"]) or st.session_state.att_files.get(t["key"])
+                    if src and src[0]:
+                        _held.append((t["sid"], t["idx"] + 1, t["condition"], src[0], src[1]))
+                _failed = [t for t in att_tasks if not (st.session_state.att_manual.get(t["key"])
+                                                         or st.session_state.att_files.get(t["key"]))]
+
+                st.markdown('<div class="section-head">Results</div>', unsafe_allow_html=True)
+                if _held:
+                    st.success(f"✅ {len(_held)} of {len(att_tasks)} plan(s) ready")
+                if _failed:
+                    st.warning(f"⚠️ {len(_failed)} plan(s) could not be downloaded")
+
+                # Folder (ZIP) — cached so it isn't rebuilt on every click
+                if _held:
+                    _sig = (tuple((h[0], h[1], len(h[3])) for h in _held))
+                    _cache = st.session_state.get("att_zip_cache")
+                    if not _cache or _cache["sig"] != _sig:
+                        with st.spinner("Preparing folder…"):
+                            _zb, _zp, _zr = build_plans_zip(_held, _att_id_to_sf)
+                        _cache = {"sig": _sig, "zip": _zb, "problems": _zp, "repaired": _zr}
+                        st.session_state.att_zip_cache = _cache
+                    if _cache["repaired"]:
+                        st.caption(f"🔧 {len(_cache['repaired'])} file(s) were cleaned up so they open normally.")
+                    if _cache["problems"]:
+                        st.warning("These file(s) couldn't be turned into a PDF and may not open — "
+                                   "download them manually instead:\n\n"
+                                   + "\n".join(f"- `{n}` — {why}" for n, why in _cache["problems"][:25]))
+                    st.download_button(
+                        f"⬇ Download {len(_held)} action plan(s) (ZIP folder)",
+                        data=_cache["zip"],
+                        file_name=f"{PLAN_FOLDER_NAME}_{datetime.now().strftime('%Y-%m-%d')}.zip",
+                        mime="application/zip", type="primary", key="att_zip_dl",
+                    )
+                    st.caption(f"Each file is named like `12345__Smith_Jane__01_Anaphylaxis.pdf` (student ID, name, plan number, condition).")
+
+                # Failures: reason + manual link + optional upload so the folder can still be completed
+                if _failed:
+                    st.markdown("**Plans that need downloading manually**")
+                    st.caption("Open each link (you'll need to be logged into the portal), save the file, then upload it here "
+                               "and it will be added to the folder with the correct name.")
+                    for t in _failed:
+                        _c1, _c2 = st.columns([3, 2])
+                        with _c1:
+                            st.markdown(f"**{t['name']}** — {t['condition']}")
+                            st.caption(f"❌ {st.session_state.att_errors.get(t['key'], 'Not downloaded yet')}")
+                            if t["url"]:
+                                st.markdown(f"[↗ Open / download manually]({t['url']})")
+                        with _c2:
+                            _up = st.file_uploader(f"Add file for {t['name']} — {t['condition']}",
+                                                   type=['pdf', 'png', 'jpg', 'jpeg'],
+                                                   key=f"att_man_{t['key']}", label_visibility="collapsed")
+                            if _up is not None:
+                                _raw = _up.getvalue()
+                                if _raw and st.session_state.att_manual.get(t["key"], (None, None))[1] != _up.name:
+                                    st.session_state.att_manual[t["key"]] = (_raw, _up.name)
+                                    st.session_state.pop("att_zip_cache", None)
+                                    st.rerun()
+                        st.divider()
+                elif _held:
+                    st.success("🎉 Every action plan was downloaded.")
 
 # ── Footer ────────────────────────────────────────────────────────────────────
 st.markdown("""
