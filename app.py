@@ -614,10 +614,19 @@ def detect_medical_flags(parsed_med, raw_med):
     else:
         haystack = raw_med or ''
     h = haystack.lower()
+    # Remove NEGATED anaphylaxis wording before searching, so that
+    # "Allergies (non-anaphylactic)" counts as a plain allergy and not as
+    # anaphylaxis. Covers: non-anaphylactic, non anaphylactic, nonanaphylactic,
+    # not anaphylactic, no anaphylaxis, without anaphylaxis, etc.
+    h_anaph = re.sub(
+        r'\b(?:non|not|no|without|nil)[\s\-]*(?:known[\s\-]*)?anaph\w*',
+        ' ',
+        h,
+    )
     return {
         'asthma':      re.search(r'asth', h) is not None,
         'allergy':     re.search(r'allerg|hay\s*-?fever', h) is not None,
-        'anaphylaxis': re.search(r'anaph', h) is not None,
+        'anaphylaxis': re.search(r'anaph', h_anaph) is not None,
     }
 
 def parse_doctors(text):
