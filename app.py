@@ -394,7 +394,96 @@ def convert_file_to_images(file_obj):
 
     return images_b64
 
+def sniff_plan_bytes(data):
+    """
+    Work out what a downloaded plan really is from its bytes (never from its name).
+    Returns (ext, clean_data, problem):
+      ext        '.pdf' / '.png' / '.jpg' / '.gif' / '.webp' / '.heic' / '.docx' / '.doc' / None if unrecognised
+      clean_data the bytes to save (a PDF with junk before '%PDF-' is trimmed so Preview accepts it)
+      problem    None if the file looks fine, else a short human-readable reason
+    """
+    if not data:
+        return None, data, "the download was empty"
+    head = data[:2048].lstrip(b"\xef\xbb\xbf \t\r\n")
+    low = head[:200].lower()
+    if low.startswith((b"<!doctype", b"<html", b"<?xml", b"<head", b"<body")) or b"<html" in low:
+        return None, data, "the server sent a web page (e.g. a login or error page) instead of a file"
+    if head[:1] in (b"{", b"[") and b'"' in head[:50]:
+        return None, data, "the server sent an error message instead of a file"
+
+    idx = data[:1024].find(b"%PDF-")
+    if idx != -1:
+        pdf = data[idx:]
+        try:
+            rd = PdfReader(BytesIO(pdf), strict=False)
+            if rd.is_encrypted or len(rd.pages) > 0:
+                return ".pdf", pdf, None
+        except Exception:
+            pass
+        # pypdf is stricter than the reader the booklet uses — only call it bad if pdfplumber can't open it either
+        try:
+            with pdfplumber.open(BytesIO(pdf)) as _p:
+                if len(_p.pages) > 0:
+                    return ".pdf", pdf, None
+        except Exception:
+            pass
+        return ".pdf", pdf, "the PDF is damaged or incomplete"
+
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return ".png", data, None
+    if data[:3] == b"\xff\xd8\xff":
+        return ".jpg", data, None
+    if data[:4] == b"GIF8":
+        return ".gif", data, None
+    if data[:4] in (b"II*\x00", b"MM\x00*"):
+        return ".tiff", data, None
+    if data[:2] == b"BM":
+        return ".bmp", data, None
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return ".webp", data, None
+    if data[4:8] == b"ftyp" and data[8:12] in (b"heic", b"heix", b"hevc", b"mif1", b"msf1", b"heim", b"heis"):
+        return ".heic", data, "this is a HEIC photo, not a PDF — it can be opened on a Mac but can't be put in the booklet"
+    if data[:4] == b"PK\x03\x04":
+        if b"word/" in data[:4096] or b"word/" in data[-4096:]:
+            return ".docx", data, "this is a Word document, not a PDF — it can't be put in the booklet"
+        return ".zip", data, "this is a ZIP/Office file, not a PDF"
+    if data[:8] == b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1":
+        return ".doc", data, "this is an old Word document, not a PDF — it can't be put in the booklet"
+    return None, data, "the file type wasn't recognised"
+
+
 def auto_download_plan(url, session_cookie, cookie_name="ASP.NET_SessionId"):
+    """
+    Downloads a plan and checks it is really a usable file (retrying a couple of times if the
+    download came back empty, truncated or as a web page). The saved extension always matches
+    the real content. Returns (BytesIO, filename, None) or (None, None, error).
+    """
+    import time as _time
+    last_err = "Unknown error"
+    for attempt in range(3):
+        fobj, fname, err = _auto_download_plan_once(url, session_cookie, cookie_name)
+        if fobj is None:
+            last_err = err or last_err
+            # Wrong/expired cookie won't fix itself on retry
+            if err and ("cookie" in err.lower() or "login" in err.lower()):
+                return None, None, err
+            _time.sleep(0.7 * (attempt + 1))
+            continue
+        ext, clean, problem = sniff_plan_bytes(fobj.getvalue())
+        if problem and ext in (None, ".pdf"):
+            last_err = problem[0].upper() + problem[1:] + "."
+            _time.sleep(0.7 * (attempt + 1))
+            continue
+        base = os.path.splitext(fname or "action_plan")[0] or "action_plan"
+        new_name = base + (ext or os.path.splitext(fname or "")[1] or ".pdf")
+        out = BytesIO(clean)
+        out.name = new_name
+        out.seek(0)
+        return out, new_name, None
+    return None, None, last_err
+
+
+def _auto_download_plan_once(url, session_cookie, cookie_name="ASP.NET_SessionId"):
     """
     Attempts to download a medical action plan file from a URL using a session cookie.
     Returns: (BytesIO file object, filename, error_message)
@@ -491,22 +580,108 @@ def _plan_norm(text):
     return re.sub(r"[^a-z0-9]", "", unicodedata.normalize("NFKD", str(text or "")).encode("ascii", "ignore").decode("ascii").lower())
 
 
-def build_plan_filename(sid, surname, first, number, condition, original_name):
-    ext = os.path.splitext(str(original_name or ""))[1].lower()
-    if ext not in _PLAN_EXTS:
+def build_plan_filename(sid, surname, first, number, condition, original_name, ext=None):
+    ext = ext or os.path.splitext(str(original_name or ""))[1].lower()
+    if not ext or len(ext) > 6:
         ext = ".pdf"
     sid_part = re.sub(r"[^A-Za-z0-9-]", "", str(sid))
     return f"{sid_part}__{_plan_slug(surname)}_{_plan_slug(first)}__{int(number):02d}_{_plan_slug(condition)}{ext}"
 
 
+def normalize_plan_to_pdf(data):
+    """
+    Turn whatever was downloaded into a clean PDF that opens everywhere (Preview, Acrobat, phones),
+    using the same readers the booklet uses (pdfplumber for PDFs, Pillow for images).
+    Returns (pdf_bytes or None, note, problem):
+      note    what was done, e.g. "was a JPEG saved with a .pdf name" ('' if the file was already fine)
+      problem set only when the file couldn't be turned into a PDF (pdf_bytes is then None)
+    """
+    ext, clean, problem = sniff_plan_bytes(data)
+    note = ""
+
+    def _images_to_pdf(images):
+        images = [im.convert("RGB") for im in images]
+        buf = BytesIO()
+        images[0].save(buf, format="PDF", save_all=True, append_images=images[1:], resolution=150.0)
+        return buf.getvalue()
+
+    # 1) PDFs — rewrite with pypdf (rebuilds a clean header/xref table), else re-render like the booklet does
+    if ext == ".pdf":
+        try:
+            rd = PdfReader(BytesIO(clean), strict=False)
+            if rd.is_encrypted:
+                rd.decrypt("")
+            wr = PdfWriter()
+            for pg in rd.pages:
+                wr.add_page(pg)
+            out = BytesIO()
+            wr.write(out)
+            out = out.getvalue()
+            if len(PdfReader(BytesIO(out), strict=False).pages) == len(rd.pages) > 0:
+                if clean != data:
+                    note = "extra bytes before the PDF header were removed"
+                return out, note, None
+        except Exception:
+            pass
+        try:
+            with pdfplumber.open(BytesIO(clean)) as pdf:
+                ims = [pg.to_image(resolution=150).original for pg in pdf.pages]
+            if ims:
+                return _images_to_pdf(ims), "the PDF was damaged, so it was rebuilt from its page images", None
+        except Exception:
+            pass
+        return None, "", problem or "the PDF could not be read"
+
+    # 2) Images (and anything else Pillow can read) — wrap in a PDF
+    try:
+        im = Image.open(BytesIO(clean))
+        frames = []
+        try:
+            from PIL import ImageSequence
+            frames = [f.copy() for f in ImageSequence.Iterator(im)]
+        except Exception:
+            frames = [im]
+        label = (ext or "image").lstrip(".").upper()
+        return _images_to_pdf(frames or [im]), f"was a {label} image saved with a .pdf name — converted to PDF", None
+    except Exception:
+        pass
+
+    # 3) Unknown content — last resort, the same attempt the booklet makes for files named .pdf
+    try:
+        with pdfplumber.open(BytesIO(clean)) as pdf:
+            ims = [pg.to_image(resolution=150).original for pg in pdf.pages]
+        if ims:
+            return _images_to_pdf(ims), "rebuilt from page images", None
+    except Exception:
+        pass
+    return None, "", problem or "the file type wasn't recognised"
+
+
 def build_plans_zip(entries, id_to_sf):
-    """entries: [(sid, number, condition, bytes, original_name)] -> ZIP bytes containing an Action_Plans/ folder."""
+    """
+    entries: [(sid, number, condition, bytes, original_name)]
+    -> (ZIP bytes containing an Action_Plans/ folder, problems [(file name, reason)], repaired [(file name, what was done)]).
+    Every file is run through the same readers the booklet uses and saved as a clean PDF, so it
+    opens in Preview even if the original download was mislabelled or had a quirky structure.
+    A file that can't be converted is still included as-is (nothing is lost) and listed in `problems`.
+    """
     buf = BytesIO()
+    problems, repaired = [], []
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for sid, number, condition, data, orig in entries:
             surname, first = id_to_sf.get(str(sid), ("", ""))
-            zf.writestr(f"{PLAN_FOLDER_NAME}/{build_plan_filename(sid, surname, first, number, condition, orig)}", data)
-    return buf.getvalue()
+            pdf, note, problem = normalize_plan_to_pdf(data)
+            if pdf is not None:
+                name = build_plan_filename(sid, surname, first, number, condition, orig, ext=".pdf")
+                zf.writestr(f"{PLAN_FOLDER_NAME}/{name}", pdf)
+                if note:
+                    repaired.append((name, note))
+            else:
+                ext, clean, _ = sniff_plan_bytes(data)
+                name = build_plan_filename(sid, surname, first, number, condition, orig, ext=ext or ".bin")
+                zf.writestr(f"{PLAN_FOLDER_NAME}/{name}", clean)
+                problems.append((name, problem or "could not be converted"))
+    return buf.getvalue(), problems, repaired
 
 
 def expand_plan_uploads(uploaded):
@@ -5026,9 +5201,20 @@ if t2 is not None:
                             f"(e.g. `12345__Smith_Jane__01_Anaphylaxis.pdf`). Unzip it and keep the folder — "
                             f"you can drop it back in below next time instead of downloading from the portal."
                         )
+                        _zip_bytes, _zip_problems, _zip_repaired = build_plans_zip(_held, _id_to_sf)
+                        if _zip_repaired:
+                            st.caption(f"🔧 {len(_zip_repaired)} file(s) were cleaned up so they open normally: "
+                                       + "; ".join(f"{n} ({why})" for n, why in _zip_repaired[:8])
+                                       + (" …" if len(_zip_repaired) > 8 else ""))
+                        if _zip_problems:
+                            st.warning(
+                                f"⚠️ {len(_zip_problems)} file(s) couldn't be turned into a PDF and may not open. "
+                                "Re-download or replace them:\n\n"
+                                + "\n".join(f"- `{n}` — {why}" for n, why in _zip_problems[:25])
+                            )
                         st.download_button(
                             f"⬇ Download {len(_held)} action plan(s) (ZIP folder)",
-                            data=build_plans_zip(_held, _id_to_sf),
+                            data=_zip_bytes,
                             file_name=f"{PLAN_FOLDER_NAME}_{datetime.now().strftime('%Y-%m-%d')}.zip",
                             mime="application/zip",
                             key="plans_zip_download",
