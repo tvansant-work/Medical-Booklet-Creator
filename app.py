@@ -394,6 +394,441 @@ def convert_file_to_images(file_obj):
 
     return images_b64
 
+# ---------------------------------------------------------------------------
+# Attachment review (final check before a booklet is generated)
+#   - long attachments (more than N pages)
+#   - duplicate uploads (same name AND same size, within one student)
+#   - several plans for the same medical condition
+# ---------------------------------------------------------------------------
+def _plan_pdf_offset(raw):
+    return raw[:1024].find(b"%PDF-")
+
+
+def plan_page_count(raw):
+    """Pages in a PDF (images count as 1; unreadable files return 0)."""
+    if not raw:
+        return 0
+    off = _plan_pdf_offset(raw)
+    if off == -1:
+        return 1
+    pdf = raw[off:]
+    try:
+        rd = PdfReader(BytesIO(pdf), strict=False)
+        if rd.is_encrypted:
+            try:
+                rd.decrypt("")
+            except Exception:
+                pass
+        n = len(rd.pages)
+        if n:
+            return n
+    except Exception:
+        pass
+    try:
+        with pdfplumber.open(BytesIO(pdf)) as p:
+            return len(p.pages)
+    except Exception:
+        return 0
+
+
+def plan_thumbnails(raw, max_pages=40, dpi=40):
+    """Small PNG previews (one per page, up to max_pages) for the review screen."""
+    out = []
+    try:
+        off = _plan_pdf_offset(raw)
+        if off != -1:
+            with pdfplumber.open(BytesIO(raw[off:])) as pdf:
+                for pg in pdf.pages[:max_pages]:
+                    im = pg.to_image(resolution=dpi).original.convert("RGB")
+                    b = BytesIO()
+                    im.save(b, format="PNG")
+                    out.append(b.getvalue())
+        else:
+            im = Image.open(BytesIO(raw)).convert("RGB")
+            im.thumbnail((420, 600))
+            b = BytesIO()
+            im.save(b, format="PNG")
+            out.append(b.getvalue())
+    except Exception:
+        pass
+    return out
+
+
+def _plan_file_key(sid, i, name, size):
+    return f"{sid}|{i}|{name}|{size}"
+
+
+def _read_plan_buf(f):
+    try:
+        f.seek(0)
+        raw = f.read()
+        f.seek(0)
+        return raw
+    except Exception:
+        return b""
+
+
+def scan_plan_issues(plan_map, id_to_name, max_pages=5, do_long=True, do_dupes=True, do_multi=True):
+    """
+    Look through the attachments about to go into the booklet and return the ones worth a human look.
+    Each item: {key, sid, student, name, size, pages, is_pdf, reasons[], default('keep'|'remove'), raw}
+    """
+    infos = []
+    for sid, fl in plan_map.items():
+        for i, f in enumerate(fl):
+            raw = _read_plan_buf(f)
+            if not raw:
+                continue
+            name = getattr(f, "name", "") or "attachment"
+            infos.append({
+                "key": _plan_file_key(sid, i, name, len(raw)), "sid": sid, "i": i,
+                "student": id_to_name.get(sid, sid), "name": name, "size": len(raw),
+                "pages": plan_page_count(raw), "is_pdf": _plan_pdf_offset(raw) != -1,
+                "condition": getattr(f, "plan_condition", None),
+                "reasons": [], "default": "keep", "raw": raw,
+            })
+
+    if do_long:
+        for it in infos:
+            if it["pages"] > max_pages:
+                it["reasons"].append(f"📄 {it['pages']} pages (longer than {max_pages})")
+
+    if do_dupes:
+        groups = {}
+        for it in infos:
+            groups.setdefault((it["sid"], it["name"].strip().lower(), it["size"]), []).append(it)
+        for grp in groups.values():
+            if len(grp) > 1:
+                for k, it in enumerate(grp):
+                    it["reasons"].append(f"📑 Uploaded {len(grp)} times (same name and size)")
+                    if k > 0:
+                        it["default"] = "remove"
+
+    if do_multi:
+        groups = {}
+        for it in infos:
+            c = _plan_norm(it["condition"])
+            if c:
+                groups.setdefault((it["sid"], c), []).append(it)
+        for grp in groups.values():
+            if len(grp) > 1:
+                for it in grp:
+                    it["reasons"].append(f"🗂️ {len(grp)} plans attached for “{it['condition']}” — an older one may need removing")
+
+    # Files that belong together (identical uploads, or plans for the same condition) are linked so the
+    # review can show them side by side. Anything with 2+ linked files gets a group number.
+    parent = list(range(len(infos)))
+
+    def _find(a):
+        while parent[a] != a:
+            parent[a] = parent[parent[a]]
+            a = parent[a]
+        return a
+
+    def _union(a, b):
+        ra, rb = _find(a), _find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    idx_of = {id(it): n for n, it in enumerate(infos)}
+    link_groups = {}
+    for n, it in enumerate(infos):
+        if do_dupes:
+            link_groups.setdefault(("dup", it["sid"], it["name"].strip().lower(), it["size"]), []).append(n)
+        c = _plan_norm(it["condition"])
+        if do_multi and c:
+            link_groups.setdefault(("cond", it["sid"], c), []).append(n)
+    for members in link_groups.values():
+        for m in members[1:]:
+            _union(members[0], m)
+
+    comps = {}
+    for n in range(len(infos)):
+        comps.setdefault(_find(n), []).append(n)
+    gid = 0
+    for members in comps.values():
+        if len(members) > 1 and any(infos[m]["reasons"] for m in members):
+            gid += 1
+            for m in members:
+                infos[m]["group"] = gid
+                infos[m]["group_size"] = len(members)
+
+    return sorted([it for it in infos if it["reasons"] or it.get("group")],
+                  key=lambda x: (x["student"].lower(), x.get("group") or 0, x["i"]))
+
+
+def apply_plan_review(plan_map, decisions):
+    """
+    decisions: {file key: {'action': 'keep'|'remove'|'pages', 'pages': [1-based page numbers]}}
+    Edits plan_map in place. Returns (files removed, files trimmed, problems [str],
+    stale = number of decisions that no longer match any current file).
+    """
+    removed = trimmed = matched = 0
+    problems = []
+    for sid in list(plan_map):
+        kept = []
+        for i, f in enumerate(plan_map[sid]):
+            raw = _read_plan_buf(f)
+            name = getattr(f, "name", "") or "attachment"
+            d = decisions.get(_plan_file_key(sid, i, name, len(raw))) if raw else None
+            if d:
+                matched += 1
+            if not d or d.get("action") == "keep":
+                kept.append(f)
+            elif d.get("action") == "remove":
+                removed += 1
+            elif d.get("action") == "pages":
+                pages = sorted({int(p) for p in (d.get("pages") or [])})
+                if not pages:
+                    removed += 1
+                    continue
+                try:
+                    rd = PdfReader(BytesIO(raw[_plan_pdf_offset(raw):]), strict=False)
+                    wr = PdfWriter()
+                    for p in pages:
+                        wr.add_page(rd.pages[p - 1])
+                    out = BytesIO()
+                    wr.write(out)
+                    nb = BytesIO(out.getvalue())
+                    nb.name = name
+                    nb.plan_condition = getattr(f, "plan_condition", None)
+                    kept.append(nb)
+                    trimmed += 1
+                except Exception as e:
+                    problems.append(f"{name}: couldn't keep only the selected pages ({e}) — the whole file was kept")
+                    kept.append(f)
+        plan_map[sid] = kept
+    return removed, trimmed, problems, max(0, len(decisions) - matched)
+
+
+def build_plan_map():
+    """
+    Collect every plan file that would go into the booklets: {student id: [BytesIO with .name]}.
+    Priority per plan slot: live uploader value > cached manual upload > auto-downloaded/imported file.
+    Each file is tagged with .plan_condition so several plans for one condition can be spotted.
+    """
+    plan_map = {}
+    detected = st.session_state.get('detected_plans', {})
+    auto_files = st.session_state.get("auto_downloaded_plan_files", {})
+    manual_uploads = st.session_state.get("manual_plan_uploads", {})
+
+    for sid, plans in (detected or {}).items():
+        for idx, _ in enumerate(plans):
+            plan_key = f"{sid}_{idx}"
+            widget_key = f"plan_upload_{sid}_{idx}"
+            cond = plans[idx].get("condition")
+
+            live_file = st.session_state.get(widget_key)
+            if live_file is not None:
+                try:
+                    live_file.seek(0)
+                    raw = live_file.read()
+                    if raw:
+                        manual_uploads[plan_key] = (raw, live_file.name)
+                        buf = BytesIO(raw)
+                        buf.name = live_file.name
+                        buf.plan_condition = cond
+                        plan_map.setdefault(sid, []).append(buf)
+                        continue
+                except Exception:
+                    pass
+
+            for store in (manual_uploads, auto_files):
+                if plan_key in store:
+                    raw_bytes, fname = store[plan_key]
+                    if raw_bytes:
+                        buf = BytesIO(raw_bytes)
+                        buf.name = fname
+                        buf.plan_condition = cond
+                        plan_map.setdefault(sid, []).append(buf)
+                        break
+
+    if "medical_plan_files" in st.session_state:
+        for sid, fl in st.session_state.medical_plan_files.items():
+            plan_map.setdefault(sid, [])
+            for f in fl:
+                plan_map[sid].append(f)
+
+    for entry in st.session_state.get("manual_plans_store", []):
+        mf = entry['file']
+        if mf is not None:
+            try:
+                mf.seek(0)
+                raw = mf.read()
+                if raw:
+                    buf = BytesIO(raw)
+                    buf.name = getattr(mf, 'name', 'plan.pdf')
+                    plan_map.setdefault(entry['sid'], []).append(buf)
+            except Exception:
+                pass
+    return plan_map
+
+
+def summarise_plan_review(decisions):
+    """(files left out, files trimmed) for a saved set of review decisions."""
+    removed = trimmed = 0
+    for d in decisions.values():
+        if d.get("action") == "remove" or (d.get("action") == "pages" and not d.get("pages")):
+            removed += 1
+        elif d.get("action") == "pages":
+            trimmed += 1
+    return removed, trimmed
+
+
+def _rv_hash(it):
+    import hashlib
+    return hashlib.md5(it["key"].encode("utf-8")).hexdigest()[:12]
+
+
+def _rv_keep_only(all_hashes, keep_hash):
+    """Button callback: keep this file, leave out the other files in its group."""
+    for x in all_hashes:
+        st.session_state[f"rv_choice_{x}"] = "Keep" if x == keep_hash else "Remove"
+
+
+def _rv_set_group(all_hashes, value):
+    for x in all_hashes:
+        st.session_state[f"rv_choice_{x}"] = value
+
+
+def _rv_render_file_card(it, group_hashes=None, label=None):
+    """One file's preview + Keep/Remove/Keep-selected-pages controls (used in groups and on its own)."""
+    h = _rv_hash(it)
+    if "_rv_thumbs" not in st.session_state:
+        st.session_state._rv_thumbs = {}
+    if "_rv_first" not in st.session_state:
+        st.session_state._rv_first = {}
+
+    if label:
+        st.markdown(f"**{label}**")
+    st.markdown(f"<div style='font-size:0.86rem;font-weight:600;word-break:break-all'>{it['name']}</div>", unsafe_allow_html=True)
+    st.caption(f"{it['size'] / 1024:,.0f} KB · {it['pages']} page{'s' if it['pages'] != 1 else ''}")
+    if it["pages"] > st.session_state.get("opt_scan_pages", 5) and st.session_state.get("opt_scan_long", True):
+        st.caption(f"📄 Longer than {st.session_state.get('opt_scan_pages', 5)} pages")
+
+    # first page, always visible, so files can be compared at a glance
+    if h not in st.session_state._rv_first:
+        st.session_state._rv_first[h] = plan_thumbnails(it["raw"], max_pages=1, dpi=60)
+    first = st.session_state._rv_first[h]
+    if first:
+        st.image(first[0], use_container_width=True)
+
+    opts = ["Keep", "Remove"]
+    if it["is_pdf"] and it["pages"] > 1:
+        opts.append("Keep selected pages")
+    choice = st.radio("Action", opts, index=1 if it["default"] == "remove" else 0,
+                      key=f"rv_choice_{h}", label_visibility="collapsed")
+    if choice == "Remove":
+        st.caption("🗑 Will be left out of the booklet")
+    if choice == "Keep selected pages":
+        st.multiselect("Pages to keep", list(range(1, it["pages"] + 1)),
+                       default=list(range(1, min(it["pages"], 5) + 1)), key=f"rv_pages_{h}")
+    if group_hashes and len(group_hashes) > 1:
+        st.button("Keep only this one", key=f"rv_only_{h}", use_container_width=True,
+                  on_click=_rv_keep_only, args=(group_hashes, h))
+    if it["pages"] > 1 and st.checkbox("👁 Show all pages", key=f"rv_prev_{h}"):
+        if h not in st.session_state._rv_thumbs:
+            with st.spinner("Rendering pages…"):
+                st.session_state._rv_thumbs[h] = plan_thumbnails(it["raw"])
+        for n, tb in enumerate(st.session_state._rv_thumbs[h], 1):
+            st.image(tb, caption=f"Page {n}", use_container_width=True)
+        if it["pages"] > len(st.session_state._rv_thumbs[h]):
+            st.caption(f"Showing the first {len(st.session_state._rv_thumbs[h])} of {it['pages']} pages.")
+
+
+def render_plan_review_panel():
+    """
+    Review screen. Files that belong together (identical uploads / several plans for one condition) are shown
+    side by side so it's easy to see which to keep; long files that aren't part of a group get a single card.
+    """
+    rv = st.session_state.get("_plan_review")
+    if not rv:
+        return
+    issues = rv["issues"]
+    groups, singles = {}, []
+    for it in issues:
+        if it.get("group"):
+            groups.setdefault(it["group"], []).append(it)
+        else:
+            singles.append(it)
+
+    st.markdown('<div class="section-head">Attachment review</div>', unsafe_allow_html=True)
+    parts = []
+    if groups:
+        parts.append(f"{len(groups)} set(s) of files to compare")
+    if singles:
+        parts.append(f"{len(singles)} long file(s)")
+    st.warning("🔎 " + " · ".join(parts) + ". Choose what to keep, then save your choices — "
+               "**Generate Medical Booklet** will use them.")
+
+    # ── Side-by-side comparison groups ───────────────────────────────────────
+    for gid, members in sorted(groups.items(), key=lambda kv: (kv[1][0]["student"].lower(), kv[0])):
+        n = len(members)
+        hashes = [_rv_hash(m) for m in members]
+        student = members[0]["student"]
+        conds = sorted({m["condition"] for m in members if m.get("condition")})
+        all_identical = len({(m["name"].strip().lower(), m["size"]) for m in members}) == 1
+        if all_identical:
+            title = f"{student} — {n} identical uploads" + (f" ({', '.join(conds)})" if conds else "")
+        elif conds and len(conds) == 1:
+            title = f"{student} — {n} plans for {conds[0]}"
+        else:
+            title = f"{student} — {n} related files" + (f" ({', '.join(conds)})" if conds else "")
+
+        with st.container(border=True):
+            st.markdown(f"**{title}**")
+            if n >= 3:
+                st.error(f"⚠️ {n} files are linked here — usually only the current one is needed. "
+                         f"Compare them and use **Keep only this one** on the right file, or choose individually.")
+            else:
+                st.caption("Compare the two files below. Keep both, or keep only the right one.")
+            qa1, _ = st.columns([1, 3])
+            with qa1:
+                st.button("Keep all", key=f"rv_all_{gid}", use_container_width=True,
+                          on_click=_rv_set_group, args=(hashes, "Keep"))
+
+            for row_start in range(0, n, 4):
+                row = members[row_start:row_start + 4]
+                cols = st.columns(len(row))
+                for col, it in zip(cols, row):
+                    with col:
+                        _rv_render_file_card(it, group_hashes=hashes, label=f"File {chr(65 + members.index(it))}")
+
+            kept = sum(1 for hh, m in zip(hashes, members)
+                       if st.session_state.get(f"rv_choice_{hh}", "Remove" if m["default"] == "remove" else "Keep") != "Remove")
+            st.caption(f"Keeping {kept} of {n} files")
+
+    # ── Single long files ────────────────────────────────────────────────────
+    if singles:
+        st.markdown("**Long attachments**")
+        for it in sorted(singles, key=lambda x: (x["student"].lower(), x["i"])):
+            with st.container(border=True):
+                st.markdown(f"**{it['student']}**")
+                _rv_render_file_card(it)
+
+    b1, b2, _ = st.columns([2, 1, 2])
+    with b1:
+        if st.button("✅ Save review choices", type="primary", key="rv_go"):
+            decisions = {}
+            for it in issues:
+                h = _rv_hash(it)
+                ch = st.session_state.get(f"rv_choice_{h}", "Remove" if it["default"] == "remove" else "Keep")
+                if ch == "Remove":
+                    decisions[it["key"]] = {"action": "remove"}
+                elif ch == "Keep selected pages":
+                    decisions[it["key"]] = {"action": "pages", "pages": st.session_state.get(f"rv_pages_{h}", [])}
+                else:
+                    decisions[it["key"]] = {"action": "keep"}
+            st.session_state._plan_review_decisions = decisions
+            st.session_state._plan_review_note = ""
+            st.session_state._plan_review = None
+            st.rerun()
+    with b2:
+        if st.button("Cancel", key="rv_cancel", help="Close the review without changing anything"):
+            st.session_state._plan_review = None
+            st.rerun()
+
+
 def sniff_plan_bytes(data):
     """
     Work out what a downloaded plan really is from its bytes (never from its name).
@@ -5612,76 +6047,81 @@ if t2 is not None:
 
             st.markdown("")
 
+            # ── Attachment review (optional — separate from generating) ───────
+            st.markdown('<div class="options-card-title">Attachment review (optional)</div>', unsafe_allow_html=True)
+            st.caption("Choose the checks you want, then click **Review attachments** to look over anything flagged. "
+                       "Skip this and **Generate** simply includes every attachment.")
+            _ac1, _ac2, _ac3 = st.columns([3, 1, 4])
+            with _ac1:
+                opt_scan_long = st.checkbox("Flag attachments longer than", value=True, key="opt_scan_long")
+            with _ac2:
+                opt_scan_pages = st.number_input("Pages", min_value=1, max_value=100, value=5, step=1,
+                                                 key="opt_scan_pages", label_visibility="collapsed")
+            with _ac3:
+                st.markdown("<div style='padding-top:8px'>pages</div>", unsafe_allow_html=True)
+            opt_scan_dupes = st.checkbox("Scan for duplicate uploads (same file name and size)", value=True, key="opt_scan_dupes")
+            opt_scan_multi = st.checkbox("Scan for multiple action plans for the same medical condition", value=True, key="opt_scan_multi")
+
+            _rvb1, _rvb2 = st.columns([1, 3])
+            with _rvb1:
+                _review_clicked = st.button("🔎 Review attachments", key="rv_start", use_container_width=True)
+
+            if _review_clicked:
+                if not (opt_scan_long or opt_scan_dupes or opt_scan_multi):
+                    st.session_state._plan_review_note = "⚠️ Tick at least one check first."
+                else:
+                    with st.spinner("Checking attachments…"):
+                        _rv_pm = build_plan_map()
+                        _rv_issues = scan_plan_issues(_rv_pm, id_to_name_map, int(opt_scan_pages),
+                                                      opt_scan_long, opt_scan_dupes, opt_scan_multi)
+                    if not _rv_pm:
+                        st.session_state._plan_review_note = "ℹ️ There are no attachments to review yet."
+                    elif _rv_issues:
+                        for _k in [k for k in st.session_state.keys() if str(k).startswith("rv_") and k != "rv_start"]:
+                            del st.session_state[_k]
+                        st.session_state._rv_thumbs = {}
+                        st.session_state._rv_first = {}
+                        st.session_state._plan_review = {"issues": _rv_issues}
+                        st.session_state._plan_review_note = ""
+                    else:
+                        st.session_state._plan_review = None
+                        st.session_state._plan_review_decisions = None
+                        st.session_state._plan_review_note = "✅ Reviewed — nothing needs your attention."
+
+            with _rvb2:
+                _rv_saved = st.session_state.get("_plan_review_decisions") or {}
+                if _rv_saved and not st.session_state.get("_plan_review"):
+                    _sr, _st_ = summarise_plan_review(_rv_saved)
+                    _sc1, _sc2 = st.columns([4, 1])
+                    with _sc1:
+                        st.markdown(f"<div style='padding-top:8px'>✅ Review saved — Generate will leave out "
+                                    f"<b>{_sr}</b> file(s) and trim <b>{_st_}</b>.</div>", unsafe_allow_html=True)
+                    with _sc2:
+                        if st.button("Clear", key="rv_clear", help="Forget the review choices and include every attachment"):
+                            st.session_state._plan_review_decisions = None
+                            st.session_state._plan_review_note = ""
+                            st.rerun()
+                elif st.session_state.get("_plan_review_note"):
+                    st.markdown(f"<div style='padding-top:8px'>{st.session_state._plan_review_note}</div>", unsafe_allow_html=True)
+
+            render_plan_review_panel()
+
+            st.markdown("")
             if st.button("Generate Medical Booklet", type="primary"):
 
-                # ── Gather plans ─────────────────────────────────────────────────
-                plan_map = {}
+                # ── Gather plans (plus any attachment-review choices the user saved) ──
                 detected = st.session_state.get('detected_plans', {})
-                auto_files = st.session_state.get("auto_downloaded_plan_files", {})
-                manual_uploads = st.session_state.get("manual_plan_uploads", {})
-
-                if detected:
-                    for sid, plans in detected.items():
-                        for idx, _ in enumerate(plans):
-                            plan_key = f"{sid}_{idx}"
-                            widget_key = f"plan_upload_{sid}_{idx}"
-
-                            # Priority 1: live widget value (present on same rerun as button click)
-                            live_file = st.session_state.get(widget_key)
-                            if live_file is not None:
-                                try:
-                                    live_file.seek(0)
-                                    raw = live_file.read()
-                                    if raw:
-                                        # Also update the persistent cache while we have it
-                                        manual_uploads[plan_key] = (raw, live_file.name)
-                                        buf = BytesIO(raw)
-                                        buf.name = live_file.name
-                                        if sid not in plan_map: plan_map[sid] = []
-                                        plan_map[sid].append(buf)
-                                        continue
-                                except Exception:
-                                    pass
-
-                            # Priority 2: cached manual upload (raw bytes, survives reruns)
-                            if plan_key in manual_uploads:
-                                raw_bytes, fname = manual_uploads[plan_key]
-                                if raw_bytes:
-                                    buf = BytesIO(raw_bytes)
-                                    buf.name = fname
-                                    if sid not in plan_map: plan_map[sid] = []
-                                    plan_map[sid].append(buf)
-                                    continue
-
-                            # Priority 3: auto-downloaded file
-                            if plan_key in auto_files:
-                                raw_bytes, fname = auto_files[plan_key]
-                                if raw_bytes:
-                                    buf = BytesIO(raw_bytes)
-                                    buf.name = fname
-                                    if sid not in plan_map: plan_map[sid] = []
-                                    plan_map[sid].append(buf)
-
-                if "medical_plan_files" in st.session_state:
-                    for sid, fl in st.session_state.medical_plan_files.items():
-                        if sid not in plan_map: plan_map[sid] = []
-                        for f in fl:
-                            plan_map[sid].append(f)
-
-                for entry in st.session_state.get("manual_plans_store", []):
-                    msid = entry['sid']
-                    mf = entry['file']
-                    if mf is not None:
-                        try:
-                            mf.seek(0)
-                            raw = mf.read()
-                            if raw:
-                                buf = BytesIO(raw)
-                                buf.name = getattr(mf, 'name', 'plan.pdf')
-                                if msid not in plan_map: plan_map[msid] = []
-                                plan_map[msid].append(buf)
-                        except Exception:
-                            pass
+                plan_map = build_plan_map()
+                _rv_dec = st.session_state.get("_plan_review_decisions") or {}
+                if _rv_dec:
+                    _rv_rem, _rv_trim, _rv_prob, _rv_stale = apply_plan_review(plan_map, _rv_dec)
+                    if _rv_rem or _rv_trim:
+                        st.info(f"Using your attachment review: {_rv_rem} file(s) left out, {_rv_trim} trimmed to selected pages.")
+                    if _rv_stale:
+                        st.warning(f"{_rv_stale} of your attachment review choice(s) no longer match the current files "
+                                   f"(they've changed since the review). Run **Review attachments** again if you want them applied.")
+                    for _p in _rv_prob:
+                        st.warning(_p)
 
                 # ── Prepare data maps (logic unchanged) ──────────────────────────
                 final_photo_map = st.session_state.auto_matches.copy()
