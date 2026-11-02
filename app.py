@@ -5420,7 +5420,7 @@ if t2 is not None:
                 # ── Sort & group ──────────────────────────────────────────────
                 status.write("Sorting & grouping…")
 
-                def render_subset(records, title_suffix="", y8_camp_group=None):
+                def render_subset(records, title_suffix="", y8_camp_group=None, y9_group=None):
                     s_list   = [r['profile'] for r in records]
                     m_list   = [r['matrix']  for r in records]
                     med_list = [r['medical'] for r in records if r['medical']]
@@ -5460,6 +5460,7 @@ if t2 is not None:
                         options=display_opts, mode="full",
                         student_count=len(s_list),
                         y8_camp_group=y8_camp_group,
+                        y9_group=y9_group,
                         camp_medications=camp_medications_for_subset,
                         camp_days=_camp_days,
                     )
@@ -5607,7 +5608,7 @@ if t2 is not None:
                         zip_buffer = BytesIO()
                         with zipfile.ZipFile(zip_buffer, "w") as zf:
                             for _i, (g, g_recs) in enumerate(y9_groups, 1):
-                                pdf_data = render_subset(g_recs, title_suffix=f"— {g['week_label']}: {g['title']}")
+                                pdf_data = render_subset(g_recs, title_suffix=f"— {g['week_label']}: {g['title']}", y9_group=g)
                                 safe_name = re.sub(r'[^a-zA-Z0-9]+', '_', f"{g['week_label']} {g['title']}").strip('_')
                                 zf.writestr(f"{_i:02d}_Medical_Booklet_{safe_name}.pdf", pdf_data)
                         status.update(label="✅ All Y9 group booklets ready", state="complete", expanded=False)
@@ -5620,7 +5621,7 @@ if t2 is not None:
                         status.write("Generating master Y9 camp PDF…")
                         writer = PdfWriter()
                         for g, g_recs in y9_groups:
-                            pdf_data = render_subset(g_recs, title_suffix=f"— {g['week_label']}: {g['title']}")
+                            pdf_data = render_subset(g_recs, title_suffix=f"— {g['week_label']}: {g['title']}", y9_group=g)
                             reader = PdfReader(BytesIO(pdf_data))
                             for page in reader.pages:
                                 writer.add_page(page)

@@ -76,6 +76,11 @@
     a { text-decoration: none; color: inherit; } 
 
     /* COVER */
+    .y9-cover-info { margin: 18px auto 10px auto; padding: 10px 14px; border-top: 1px solid #ddd; border-bottom: 1px solid #ddd; text-align: center; }
+    .y9-cover-info .y9-week { font-size: 11pt; color: #444; margin-bottom: 8px; }
+    .y9-cover-info .y9-leaders-label { font-size: 8pt; text-transform: uppercase; letter-spacing: 1px; color: #777; }
+    .y9-cover-info .y9-leaders { font-size: 15pt; font-weight: bold; color: #1a3a5c; margin-top: 2px; }
+    .y9-cover-info .y9-notes { font-size: 10pt; color: #c62828; font-weight: bold; margin-top: 8px; }
     .cover { text-align: center; margin-top: 35%; border: 4px solid #c62828; padding: 30px; }
     .conf { color: #c62828; font-weight: bold; margin-top: 20px; text-transform: uppercase; letter-spacing: 1px; }
 
@@ -330,6 +335,14 @@
 
     <div class="cover">
         <h1>{{ title }}</h1>
+        {% if y9_group %}
+        <div class="y9-cover-info">
+            <div class="y9-week">{{ y9_group.week_label }}{% if y9_group.week_detail %}: {{ y9_group.week_detail }}{% endif %}</div>
+            <div class="y9-leaders-label">Group leaders</div>
+            <div class="y9-leaders">{% if y9_group.leaders %}{{ y9_group.leaders | join('  ·  ') }}{% else %}Not listed{% endif %}</div>
+            {% if y9_group.notes %}<div class="y9-notes">{{ y9_group.notes | join(' · ') }}</div>{% endif %}
+        </div>
+        {% endif %}
         <p>Generated {{ date }}</p>
         <div class="conf">CONFIDENTIAL – Destroy securely after use</div>
     </div>
