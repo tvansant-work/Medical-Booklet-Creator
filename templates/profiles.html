@@ -356,7 +356,7 @@
        sign-off column per camp day, plus 5 blank rows at the bottom
        for late arrivals or additional medications on the day.
     ════════════════════════════════════════════════════════════════ #}
-    {% if camp_medications %}
+    {% if camp_medications or camp_med_uploaded %}
     <div class="camp-med-filing-header">{{ title }} &nbsp;&middot;&nbsp; Generated {{ date }}</div>
     <div class="camp-med-heading">💊 Camp Medication Administration Log</div>
     <div class="camp-med-preamble">
@@ -365,6 +365,13 @@
         Five blank rows are provided at the bottom for any medications that arrive on the day of camp.
         This document is <strong>CONFIDENTIAL</strong> — store securely and destroy after the camp.
     </div>
+    {% if not camp_medications %}
+    <div class="camp-med-preamble" style="font-style:normal;font-size:9pt;border-left-color:#e65100;background:#fff8e1;color:#333;">
+        <strong>No camp medications were listed through Paperly for this group.</strong>
+        If a student's medication is discovered on camp, or was forgotten by a parent, record it in a blank row below
+        (student name, medication details) and sign it off each time it is given.
+    </div>
+    {% endif %}
     <table class="camp-med-table">
         <thead>
             <tr>
@@ -380,7 +387,7 @@
         </thead>
         <tbody>
             {# Student rows — one row per medication; student name spans all their medication rows #}
-            {% for entry in camp_medications %}
+            {% for entry in (camp_medications or []) %}
                 {% for med in entry.medications %}
                 <tr class="no-break">
                     {% if loop.first %}

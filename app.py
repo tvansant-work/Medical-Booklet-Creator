@@ -5874,7 +5874,8 @@ if t2 is not None:
 
             # ── Camp Medication Log (only if CSV was uploaded) ────────────────────
             _has_camp_meds = bool(st.session_state.get('camp_medication_matched') or
-                                  st.session_state.get('camp_medication_manual'))
+                                  st.session_state.get('camp_medication_manual') or
+                                  'camp_med_csv' in st.session_state)
             if _has_camp_meds:
                 st.markdown('<div class="section-head">💊 Camp Medication Log</div>', unsafe_allow_html=True)
                 _camp_matched_count = len(st.session_state.get('camp_medication_matched', {})) + \
@@ -5882,6 +5883,7 @@ if t2 is not None:
                 st.info(
                     f"A medication administration log page will be added to the booklet "
                     f"for **{_camp_matched_count} student(s)** with medications. "
+                    f"Groups with no listed medications get a page saying so, with blank rows for staff to fill in. "
                     f"Set the number of camp days below so sign-off columns can be generated."
                 )
                 camp_days_input = st.number_input(
@@ -6419,6 +6421,7 @@ if t2 is not None:
                         y8_camp_group=y8_camp_group,
                         y9_group=y9_group,
                         camp_medications=camp_medications_for_subset,
+                        camp_med_uploaded=('camp_med_csv' in st.session_state),
                         camp_days=_camp_days,
                     )
                     return HTML(string=full_html).write_pdf()
